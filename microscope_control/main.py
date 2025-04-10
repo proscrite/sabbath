@@ -288,7 +288,40 @@ class Setup:
             self.open_shutter()
             self.meter.open(1)
             time.sleep(1)
+            steps = np.linspace(0, 1600, npoints)
+            first_power = round(self.meter.read(), 7)
+            self.take_single_frame(name, path, filters, shutter=False) # Get initial image before attenuating
+            powers = [first_power * 1e6]   # Get initial power
+            angles = [0]
+
+            # Iterate over steps up to last one (repeated unattenuated power)
+            for i, s in enumerate(steps[:-1]):
+                command = f'{int(steps[1])}\n'
+                angles.append(round(s * 360 / 1600, 1))
+                self.arduino.write(command.encode())  # Send command to Arduino
+                time.sleep(3)
+                power = round(self.meter.read(), 7)   # Need high precision for low power reading
+                powers.append(power*1e6)
+                print(f"Frame nr. {i}, Power: {round(power * 1e6, 2)} uW")
+                self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', power*1e6)
+                data = self.cam.snap(timeout=15)
+                saving.single_tif_save(data, path, name, round(power * 1e6, 2), filters)
+        
+        else:
+            return
+        
+        self.arduino.write(command.encode())   # Advance one more step (without taking image) to recover the unattenuated power
+
         self.meter.close()
+        self.close_shutter()
+        SetupSettings.write_settings(path, self.settings)
+       
+        df_power = pd.DataFrame({'angle': angles, 'power(uW)': powers})   # Record power and angle and store in csv file
+        df_power.to_csv(path + '\power_ramp.csv', index=False)         
+        path_sample = os.path.split(path)[0] + '/'
+        print('Calling analyse_ramp for path: ', path_sample)
+        
+        analyse_ramp(path_sample, roi=self.roi)
 
     def open_cam(self):
         self.cam.open()
@@ -394,7 +427,18 @@ class Setup:
 
             for i in range(nframes):
                 print("Frame nr. %i" %i)
-                self.take_single_frame(name, path, filters)
+                self.take_single_frame(name, path, filters, shutter=False)
+                img = img[self.roi[0]: self.roi[1], self.roi[2]: self.roi[3]]
+                # mean_intensities.append(np.mean(img))
+                # line.set_data(range(len(mean_intensities)), mean_intensities)
+                # ax.relim()              # Recompute the data limits
+                # ax.autoscale_view()     # Rescale the view to the new data
+                # plt.draw()              # Update the plot with new data
+            
+            self.close_shutter()
+            # plt.ioff()
+            # plt.show()
+
             SetupSettings.write_settings(path, self.settings)
             path_sample = os.path.split(path)[0] + '/'    # Get path to sample folder, this way the spectrum analysis is done for all measurements in the same folder
             print('Calling analyse_spectrum for path: ', path_sample) 
