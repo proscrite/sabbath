@@ -1,22 +1,34 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
+
 import os
 import sys
-from skimage import io, color, filters, morphology, measure
+from skimage import io, color, filters, morphology, measure, exposure
+from skimage.draw import disk
 
-def find_fov(gray_image):
+from skimage.filters import threshold_otsu, threshold_li, threshold_yen
+
+ROOT_DIR = 'G:\\My Drive\\Ba Tagging\\'
+FILTER_PATH = ROOT_DIR +'\\code\\imag_analisis\\filter_stats.csv'
+filtQE = pd.read_csv(FILTER_PATH).mean_qe
+
+def fov_threshold(img, method = ['otsu', 'li', 'yen']):
+    threshold = {'otsu': threshold_otsu, 'li': threshold_li, 'yen': threshold_yen}
+    img = exposure.equalize_hist(img)
+    threshold = threshold[method](img)
+    print('Threshold: '+method, threshold)
+    binary_mask = img > threshold
+
+    return binary_mask
+
+def make_circular_region(binary_mask):
     """Finding the field of view in a gray image. This will be the disk with the largest area and solidity.
     Args: gray_image: 2D numpy array representing the gray image.
     Returns: fov_mask: 2D numpy array representing the binary mask of the field of view.
     
     """
-
-    # Apply thresholding to create a binary mask
-    threshold = filters.threshold_otsu(gray_image)
-    print('Threshold otsu: ', threshold)
-    binary_mask = gray_image > threshold
-
     # Perform morphological closing to fill small gaps
     binary_mask = morphology.closing(binary_mask, morphology.disk(10))
 
@@ -29,17 +41,16 @@ def find_fov(gray_image):
     # Find the largest circular region based on area and solidity
     best_region = None
     best_circularity = 0
-
+    best_area = 100             # Initialize area over 100 to ignore small noise
     for region in regions:
         area = region.area
         perimeter = region.perimeter if region.perimeter > 0 else 1
         circularity = 4 * np.pi * (area / (perimeter ** 2))
         
-        if circularity > best_circularity and area > 1000:  # Ignore small noise
+        if circularity > best_circularity and area > best_area:  # Find the largest circular region
             best_circularity = circularity
             best_region = region
             best_area = area
-
 
     # Create a mask for the detected FOV
     fov_mask = np.zeros_like(binary_mask, dtype=bool)
@@ -47,6 +58,35 @@ def find_fov(gray_image):
     if best_region:
         fov_mask[labeled_mask == best_region.label] = True
     return fov_mask, best_area, best_region
+
+def find_fov(img, name: str, method = ['None', 'otsu', 'li', 'yen'], flag_plot = True):
+    """Full FOV detection in a gray image.
+    Args: gray_image: 2D numpy array representing the gray image.
+    Returns: fov_mask: 2D numpy array representing the binary mask of the field of view.
+    
+    """
+    
+    if method == 'None':
+        method = 'yen'
+    binary_mask = fov_threshold(img, method)
+    
+    binary_mask = morphology.remove_small_objects(binary_mask, min_size=10)  # Remove small noise
+    fov_mask, area, region = make_circular_region(binary_mask)   # Find the most circular region in the mask, this is the fine grained FOV
+
+    mask_disk = np.zeros_like(img, dtype=bool)
+    rr, cc = disk(center=region.centroid, radius=region.axis_major_length/2, shape=mask_disk.shape)   # Make a perfect circular mask
+    mask_disk[rr, cc] = True
+
+    if flag_plot:
+        fig_fov, ax_fov = plt.subplots()
+        obj_imshow = ax_fov.imshow(mask_disk * img)
+        plt.colorbar(obj_imshow, ax=ax_fov)
+        plt.scatter(region.centroid[1], region.centroid[0], color='red')
+        ax_fov.add_patch(Circle((region.centroid[1], region.centroid[0]), region.axis_major_length/2, fill=False, color='red'))
+        ax_fov.set(title='FOV detection' + name)
+        
+    return mask_disk
+
 
 def offset_circular_mask(img, best_region, best_area, flag_plot = True):
     """Create a circular mask based on the detected region.
@@ -85,11 +125,11 @@ def prepare_spectrum(files, roi = None):
     nfilt = len(files)
     
     img0 = io.imread(files[0]).astype(np.int64)
-    fov, best_area, best_region = find_fov(img0, flag_plot=False)    # Refined FOV search
+    mask_disk= find_fov(img0, method='yen', flag_plot=False)    # Refined FOV search
     
-    circ_mask = offset_circular_mask(img, best_region, best_area, flag_plot=False)  # Rough (perfect) circular mask
-    img0[~circ_mask] = 0
-    imsize = circ_mask[circ_mask].shape    # Number of pixels in the circular mask
+    # circ_mask = offset_circular_mask(img, best_region, best_area, flag_plot=False)  # Rough (perfect) circular mask
+    img0[~mask_disk] = 0
+    imsize = mask_disk[mask_disk].shape    # Number of pixels in the circular mask
     # imsize = img0.shape[0] * img0.shape[1]
     
     if roi != None:
@@ -101,7 +141,8 @@ def prepare_spectrum(files, roi = None):
     unInt = []
     for i in range(nfilt-1):
         img = io.imread(files[i]).astype(np.int64)
-        img[~circ_mask] = 0
+        img[~mask_disk] = 0
+
         if roi != None:
             img = img[roi[0]:roi[1], roi[2]:roi[3]]
         intPx = (img.sum() - offset) / imsize
