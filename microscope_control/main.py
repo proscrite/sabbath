@@ -13,7 +13,6 @@ import saving
 import SetupSettings
 import motor
 import serial
-
 import sys
 import warnings
 warnings.filterwarnings("ignore", message=".*low contrast image.*")
@@ -46,6 +45,7 @@ class Setup:
         self.max_power = self.get_power()
         self.position_max = 0.0
         self.roi = [0, 2048, 0, 2048]  # Default ROI for the whole image
+
         self.cam.set_exposure(0.5)   # Set default exposure time to 0.5s
         
         self.menu = \
@@ -65,6 +65,8 @@ class Setup:
             'N': (self.maximum_power, 'Set power to maximum'),
             'r': (self.power_ramp, 'Power ramps'),
             'R': (self.select_ROI, 'Select ROI'),
+            't': (self.time_evolution, 'Take time evolution'),
+            'e': (self.set_exposure, 'Set camera exposure'),
             ',': (self.settings_menu, 'Settings menu'),
             'q': (self.leave, 'quit')
             # 'cam': (self.show_prop_camera, 'Show camera proerties'),
@@ -371,6 +373,7 @@ class Setup:
         self.wheel.close()
         self.meter.close()
         self.arduino.close()
+
 
     def autofocus(self):
         self.open_shutter()
