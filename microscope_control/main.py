@@ -25,6 +25,7 @@ import thorlabs_apt as apt
 from utils import *
 from quick_spectra import analyse_spectrum
 from get_trajectories import analyse_trajectories
+from analyse_power_ramps import analyse_ramp
 
 data_struct = np.dtype([('date', 'double'), ('power', 'double'), ('name', str), ('images', (np.uint16, (24, 2048, 2048)))])
 
@@ -38,6 +39,11 @@ class Setup:
         self.meter = Meter2.Meter()
         self.settings = pd.DataFrame()
         self.motor = apt.Motor(26002227)
+        self.arduino = serial.Serial("COM6", 9600, timeout=1) # Open serial port to arduino
+        self.fraction_power = 1.0
+        self.max_power = self.get_power()
+        self.position_max = 0.0
+        self.roi = [0, 2048, 0, 2048]  # Default ROI for the whole image
         self.cam.set_exposure(0.5)   # Set default exposure time to 0.5s
         
         self.menu = \
@@ -48,8 +54,13 @@ class Setup:
             'a': (self.autofocus, 'Autofocus'),
             'h': (0, 'List of commands'),
             'z': (self.move_zpos, 'Move Z position'),
+            's': (self.toggle_shutter, 'Shutter (open/close)'),
             't': (self.time_evolution, 'Take time evolution'),
             'e': (self.set_exposure, 'Set camera exposure'),
+            'p': (self.print_power, 'Get power reading'),
+            'n': (self.attenuate_power, 'Set power attenuation'),
+            'N': (self.maximum_power, 'Set power to maximum'),
+            'r': (self.power_ramp, 'Power ramps'),
             ',': (self.settings_menu, 'Settings menu'),
             'q': (self.leave, 'quit')
             # 'cam': (self.show_prop_camera, 'Show camera proerties'),
@@ -69,12 +80,19 @@ class Setup:
         for i in menu.keys():
             print(i + ':\t' + menu[i][1])
 
-    def take_single_frame(self, name, path, filters):
+    def take_single_frame(self, name, path, filters, shutter = True):
         # print('Filters: ', filters)
         self.wheel.set_filter(filters)
         # self.cam.exposure_time(self.cam.exposure)
         # print('Camera exposure: ', round(self.cam.get_exposure(), 2) )
+        if shutter:
+            self.open_shutter()
+        
         data = self.cam.snap(timeout=15)
+    
+        if shutter:
+            self.close_shutter()
+
         # num = saving.save_npy(data, name)
         try:
             power = round(self.meter.read() * 1e6, 4)
@@ -87,7 +105,7 @@ class Setup:
     def take_images(self, name, filters):
         if filters != 0:
             rootpath = IMAGE_SINGLE_SAVE_LOCATION
-            path = saving.check_path_save(rootpath, name)
+            path = saving.check_path_save(rootpath, name, filters=None)
             self.take_single_frame(name, path, filters)
             power = round(self.meter.read() * 1e6, 4)
             self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', power)
@@ -101,7 +119,7 @@ class Setup:
             data_set['name'][0] = name
             rootpath = IMAGE_SET_SAVE_LOCATION
             # print('Before loop: current exposure is %0.2f s \n' %(self.cam.get_exposure()) )
-
+            powers = []
             for i in range(11, -1, -1):
                 self.wheel.set_filter(i+1)
                 print("Current filter: %i" %(i+1))
@@ -109,16 +127,39 @@ class Setup:
                 # print('Current exposure is %0.2f s \n' %(self.cam.exposure) )
                 
             #    camera.exposure_time(FILTERS_EXPOSER[i + 1])
+                self.open_shutter()
                 data_set['images'][0][i] = self.cam.snap(timeout=15)
+                powers.append(round(self.meter.read() * 1e6, 4))
+                self.close_shutter()
             
             save_path = saving.save_tif_set(data_set['images'][0], name, data_set['power'][0])
-            power = round(self.meter.read() * 1e6, 4)
-
-            self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', power)
+            mean_power = np.mean(powers)
+            
+            self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', mean_power)
 
             SetupSettings.write_settings(save_path, self.settings)
             print_image_set(data_set['images'][0])
-            print()
+            return save_path
+
+    def send_ttl(self, command):
+        self.arduino.write(command.encode())  # Send 'H' or 'L'
+        response = self.arduino.readline().decode().strip()
+        # print("Arduino says:", response)
+
+    def toggle_shutter(self):
+        self.send_ttl('T')
+
+    def open_shutter(self):
+        self.send_ttl('H')
+    
+    def close_shutter(self):
+        self.send_ttl('L') 
+
+    def get_power(self):
+        if self.meter.open(1):
+            current_power = round(self.meter.read(), 7)   # Need high precision for low power reading
+        self.meter.close()
+        return current_power
 
     def move_filter(self):
         filters = 0
@@ -156,6 +197,8 @@ class Setup:
         self.cam.close()
         self.wheel.close()
         self.meter.close()
+        self.arduino.close()
+
     def autofocus(self):
         self.open_shutter()
         motor.main_autofocus(self.cam, self.motor, self.wheel)
@@ -221,11 +264,24 @@ class Setup:
         question += '\nTake image with this parameters? y/n\n'
         if get_yes_no(question):
             rootpath = IMAGE_TIMERUN_SAVE_LOCATION
-            path = saving.check_path_save(rootpath, name)
+            path = saving.check_path_save(rootpath, name, filters=filters)
+            # mean_intensities = []
+            self.open_shutter()
+
+            # plt.ion()
+            # fig, ax = plt.subplots()
+            # line, = ax.plot([], [], 'b-o')  # Initialize an empty line plot
+            # ax.set_xlabel('Frame number')
+            # ax.set_ylabel('Mean intensity')
+
             for i in range(nframes):
                 print("Frame nr. %i" %i)
                 self.take_single_frame(name, path, filters)
             SetupSettings.write_settings(path, self.settings)
+            path_sample = os.path.split(path)[0] + '/'    # Get path to sample folder, this way the spectrum analysis is done for all measurements in the same folder
+            print('Calling analyse_spectrum for path: ', path_sample) 
+            # analyse_trajectories(path_sample)
+
             # self.close_all_devices()
             
     # def take_sequence(self):
