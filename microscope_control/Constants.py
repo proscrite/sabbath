@@ -1,4 +1,4 @@
-AURTHUR = 'Nir Kapon'
+AUTHOR = 'Nir Kapon'
 
 # FILTERS = \
 #     {
@@ -21,19 +21,19 @@ FILTERS = \
         1: "Center-NA_Width-NA",
         2: "Dark_Blind",
         3: "Center-438nm_Width-28nm",
-        4: "Center-472nm_Width-35nm",
-        5: "Center-549nm_Width-21nm",
-        6: "Center-575nm_Width-35nm",
-        7: "Center-586nm_Width-26nm",
+        4: "Center-500nm_Width-29nm",
+        5: "Center-527nm_Width-22nm",
+        6: "Center-549nm_Width-21nm",
+        7: "Center-575nm_Width-35nm",
         8: "Center-605nm_Width-22nm",
         9: "Center-631nm_Width-28nm",
         10: "Center-661nm_Width-26nm",
         11: "Center-676nm_Width-29nm",
         12: "Center-692nm_Width-47nm"
     }
-EXCITATION_FILTER = "Center-527nm_Width-22nm",
-DOUBLE_FILTER = "Center-561nm_Width-21nm"
-LEFTOVER_FILTER = "Center-500nm_Width-29nm",
+EXCITATION_FILTER = None
+DOUBLE_FILTER = "Center-586nm_Width-26nm"
+LEFTOVER_FILTER = ["Center-561nm_Width-21nm", "Center-475nm_Width-28nm"]  # Not in use
 LASER_WAVELENGTH = "515nm"
 LASER_SOURCE = {1: "TOptica",
                 2: "Diode"}
@@ -48,10 +48,10 @@ FILTERS_BANDS = \
         1:  (None, None),
         2:  (None, None),
         3:  (438, 28),
-        4:  (472, 35),
-        5:  (549, 21),
-        6:  (575, 35),
-        7:  (586, 26),
+        4:  (500, 29),
+        5:  (527, 22),
+        6:  (549, 21),
+        7:  (575, 35),
         8:  (605, 22),
         9:  (631, 28),
         10: (661, 26),
@@ -85,6 +85,7 @@ TIME_FORMAT_TODAY = '%d-%m-%y'
 IMAGE_SET_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\sets\\"
 IMAGE_SINGLE_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\sing\\"
 IMAGE_TIMERUN_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\time\\"
+IMAGE_POWER_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\ramp\\"
 
 NP_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\numpy\\"
 EXIFTOOL_APP = "G:\\My Drive\\Ba Tagging\\code\\microscope_control\\exiftool.exe"
@@ -95,15 +96,16 @@ EXIFTOOL_OK_STRING = "1 image files updated"
 SAMPLES = \
     {
         0:  'other',
-        'q': 'quit',
         1:  'RuSL',
         2:  'quartz',
-        3:  'resolution target',
-        4:  'Bromobimane_Acetonitrile',
-        5:  'Bromobimane_H2O',
-        6:  'FS6_Bromob_1e-6',
-        7:  'IPG-4 1 µM',
-        8:  'Rhodamine-B 50 µM'
+        3:  'Bromobimane_Acetonitrile',
+        4:  'Bromobimane_H2O',
+        5:  'FS6_Bromob_1e-6',
+        6:  'IPG-4 1 µM',
+        7:  'Rhodamine-B 50 µM 270225',
+        8:  'Rhodamine-B 5 µM 270225',
+        9:  'Rhodamine-B 0.5 µM 270225',
+        'q': 'quit',
     }
 
 # camera prop id
