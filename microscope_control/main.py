@@ -54,6 +54,7 @@ class Setup:
             'a': (self.autofocus, 'Autofocus'),
             'h': (0, 'List of commands'),
             'z': (self.move_zpos, 'Move Z position'),
+            'l': (self.live_cam, 'Live camera'),
             's': (self.toggle_shutter, 'Shutter (open/close)'),
             't': (self.time_evolution, 'Take time evolution'),
             'e': (self.set_exposure, 'Set camera exposure'),
@@ -101,6 +102,21 @@ class Setup:
             print('Cannot read power')
         saving.single_tif_save(data, path, name, power, filters)
         return data
+
+    def live_cam(self):
+        if self.cam.is_opened() is True:
+            self.cam.close()
+            time.sleep(2)
+        import live_cam
+        # import threading
+        self.open_shutter()
+        live_cam.dcam_live_capturing()
+        print('Returned from live_cam')
+        del(live_cam)
+        self.close_shutter()
+        self.cam.open()
+        self.cam.set_exposure(0.5)
+        # th = threading.Thread(target=live_cam.dcamtest_thread_live)
 
     def take_images(self, name, filters):
         if filters != 0:
