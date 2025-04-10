@@ -26,6 +26,8 @@ from utils import *
 from quick_spectra import analyse_spectrum
 from get_trajectories import analyse_trajectories
 from analyse_power_ramps import analyse_ramp
+from dynamic_roi_draw import run_roi_selector
+
 
 data_struct = np.dtype([('date', 'double'), ('power', 'double'), ('name', str), ('images', (np.uint16, (24, 2048, 2048)))])
 
@@ -62,6 +64,7 @@ class Setup:
             'n': (self.attenuate_power, 'Set power attenuation'),
             'N': (self.maximum_power, 'Set power to maximum'),
             'r': (self.power_ramp, 'Power ramps'),
+            'R': (self.select_ROI, 'Select ROI'),
             ',': (self.settings_menu, 'Settings menu'),
             'q': (self.leave, 'quit')
             # 'cam': (self.show_prop_camera, 'Show camera proerties'),
@@ -125,7 +128,6 @@ class Setup:
             self.take_single_frame(name, path, filters)
             power = round(self.meter.read() * 1e6, 4)
             self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', power)
-            
             SetupSettings.write_settings(path, self.settings)
             return path
 
@@ -156,6 +158,10 @@ class Setup:
             SetupSettings.write_settings(save_path, self.settings)
             print_image_set(data_set['images'][0])
             return save_path
+
+    def select_ROI(self):
+        img0 = self.cam.snap(timeout=15)
+        self.roi = run_roi_selector(img0)
 
     def send_ttl(self, command):
         self.arduino.write(command.encode())  # Send 'H' or 'L'
@@ -443,7 +449,7 @@ class Setup:
 
             for i in range(nframes):
                 print("Frame nr. %i" %i)
-                self.take_single_frame(name, path, filters, shutter=False)
+                img = self.take_single_frame(name, path, filters, shutter=False)
                 img = img[self.roi[0]: self.roi[1], self.roi[2]: self.roi[3]]
                 # mean_intensities.append(np.mean(img))
                 # line.set_data(range(len(mean_intensities)), mean_intensities)
@@ -560,4 +566,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
