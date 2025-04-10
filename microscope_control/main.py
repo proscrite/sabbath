@@ -25,6 +25,9 @@ from utils import *
 from quick_spectra import analyse_spectrum
 from get_trajectories import analyse_trajectories
 from analyse_power_ramps import analyse_ramp
+from dynamic_roi_draw import run_roi_selector
+
+
 data_struct = np.dtype([('date', 'double'), ('power', 'double'), ('name', str), ('images', (np.uint16, (24, 2048, 2048)))])
 
 global texp
@@ -53,6 +56,7 @@ class Setup:
             'a': (self.autofocus, 'Autofocus'),
             'h': (0, 'List of commands'),
             'z': (self.move_zpos, 'Move Z position'),
+            'l': (self.live_cam, 'Live camera'),
             's': (self.toggle_shutter, 'Shutter (open/close)'),
             't': (self.time_evolution, 'Take time evolution'),
             'e': (self.set_exposure, 'Set camera exposure'),
@@ -60,6 +64,7 @@ class Setup:
             'n': (self.attenuate_power, 'Set power attenuation'),
             'N': (self.maximum_power, 'Set power to maximum'),
             'r': (self.power_ramp, 'Power ramps'),
+            'R': (self.select_ROI, 'Select ROI'),
             't': (self.time_evolution, 'Take time evolution'),
             'e': (self.set_exposure, 'Set camera exposure'),
             ',': (self.settings_menu, 'Settings menu'),
@@ -103,6 +108,21 @@ class Setup:
         saving.single_tif_save(data, path, name, power, filters)
         return data
 
+    def live_cam(self):
+        if self.cam.is_opened() is True:
+            self.cam.close()
+            time.sleep(2)
+        import live_cam
+        # import threading
+        self.open_shutter()
+        live_cam.dcam_live_capturing()
+        print('Returned from live_cam')
+        del(live_cam)
+        self.close_shutter()
+        self.cam.open()
+        self.cam.set_exposure(0.5)
+        # th = threading.Thread(target=live_cam.dcamtest_thread_live)
+
     def take_images(self, name, filters):
         if filters != 0:
             rootpath = IMAGE_SINGLE_SAVE_LOCATION
@@ -110,7 +130,6 @@ class Setup:
             self.take_single_frame(name, path, filters)
             power = round(self.meter.read() * 1e6, 4)
             self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', power)
-            
             SetupSettings.write_settings(path, self.settings)
             return path
 
@@ -141,6 +160,10 @@ class Setup:
             SetupSettings.write_settings(save_path, self.settings)
             print_image_set(data_set['images'][0])
             return save_path
+
+    def select_ROI(self):
+        img0 = self.cam.snap(timeout=15)
+        self.roi = run_roi_selector(img0)
 
     def send_ttl(self, command):
         self.arduino.write(command.encode())  # Send 'H' or 'L'
@@ -429,7 +452,7 @@ class Setup:
 
             for i in range(nframes):
                 print("Frame nr. %i" %i)
-                self.take_single_frame(name, path, filters, shutter=False)
+                img = self.take_single_frame(name, path, filters, shutter=False)
                 img = img[self.roi[0]: self.roi[1], self.roi[2]: self.roi[3]]
                 # mean_intensities.append(np.mean(img))
                 # line.set_data(range(len(mean_intensities)), mean_intensities)
@@ -546,4 +569,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
