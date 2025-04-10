@@ -4,10 +4,12 @@ import numpy as np
 from Constants import *
 #import cv2
 from PIL import Image
+from skimage import io
 import piexif
 import subprocess
 import re
-
+import warnings
+warnings.filterwarnings("ignore", message=".*low contrast image.*")
 
 def read_exif(filename):
     result = subprocess.run([EXIFTOOL_APP, filename], stdout=subprocess.PIPE)
@@ -54,7 +56,7 @@ def save_npy(data, name):
     return num
 
 
-def check_path_save(rootpath, name):
+def check_path_save(rootpath, name, filters=None):
     today = time.strftime(TIME_FORMAT_TODAY)
     path = rootpath + today + '\\' + name
 
@@ -66,28 +68,36 @@ def check_path_save(rootpath, name):
 
    ####### Check number of existing measurements in directory
     try: 
-        last_set = int(nsets[-1])
+        last_set = int(nsets[-1][0])
     except IndexError: last_set = 0
 
    ####### Set current measurement as last_set + 1 (previously 'num')
-    path += '\\' + str(last_set+1)
+    path += '\\' + str(last_set+1).zfill(2)
+
+   ######  For time and ramp measurements, add the filter number to the path. Ex: /sample/3-f7-575nm/
+    if filters is not None:
+        path += '-filt' + str(filters) + str(FILTERS[filters].split('_')[0][6:])
+
     if not os.path.exists(path):
         os.makedirs(path)
     return path
 
 
-def single_tif_save(data, path, name, filters):
+def single_tif_save(data, path, name, power, filters):
     
-    path_file = path + '\\' + FILTERS[filters] + '_' + time.strftime('%H-%M-%S') + '.tif'
-    imax = np.amax(data)
-    if imax > 0:
-        image_multiplayer = int(65535 / imax)
-        data = data * image_multiplayer
-    else:
-        image_multiplayer = 1
+    # path_file = path + '\\' + FILTERS[filters] + '_' + time.strftime('%H-%M-%S') + '.tif'
+    path_file = path + '\\' + FILTERS[filters] + '_' + time.strftime('%H-%M-%S') + '_P_' + str(power) + 'uW.tif'
 
-    img = Image.fromarray(data)
-    img.save(path_file)
+    imax = np.amax(data)
+    # if imax > 0:
+    #     image_multiplayer = int(65535 / imax)
+    #     data = data * image_multiplayer
+    # else:
+    #     image_multiplayer = 1
+
+    # img = Image.fromarray(data)
+    # img.save(path_file)
+    io.imsave(path_file, data)
 
 
 def save_tif_set(data, name, power):
@@ -100,14 +110,14 @@ def save_tif_set(data, name, power):
         print('Filter save: ', filters)
         print(path_file)
         imax = np.amax(data[filters])
-        if imax > 0:
-            image_multiplayer = int(65535 / imax)
-            data = data * image_multiplayer
-        else:
-            image_multiplayer = 1
-
-        img = Image.fromarray(data[filters])
-        img.save(path_file)
+        # if imax > 0:
+        #     image_multiplayer = int(65535 / imax)
+        #     data = data * image_multiplayer
+        # else:
+        #     image_multiplayer = 1
+        io.imsave(path_file, data[filters])
+        # img = Image.fromarray(data[filters])
+        # img.save(path_file)
         
     return path
         # set_exif_field(path, 'ExposureTime', int(FILTERS_EXPOSER[filters]*1000))) # problem writing into
