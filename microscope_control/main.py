@@ -167,8 +167,126 @@ class Setup:
             filters = get_filters_to_snap()
         self.wheel.set_filter(filters)
 
+    def print_power(self):
         if self.meter.open(1):
-            print(f'Power: {self.meter.read()} W')
+            current_power = self.meter.read()
+            print(f'Power: {current_power*1e6} μW')
+            time.sleep(2)
+        self.meter.close()
+        return current_power
+
+    def attenuate_power(self):
+        new_fraction_power = input('Enter the power fraction (0 to 1) \nor order of magnitude (-1 to -4): ')
+        try:
+            new_fraction_power = float(new_fraction_power)
+        except ValueError:
+            print("Invalid input. Please enter a number between 0 and 1")
+        """Set the power to a percentage of the maximum power"""
+        if new_fraction_power > 1.0:
+            raise ValueError("Percentage must be between 0 and 1")
+        
+        exp_parameter = 0.01685    # Exponential decay parameter for the power ramp (conversion factor from desired power to angle)
+        if new_fraction_power > self.fraction_power:
+            # Attenuate power to a fraction of the maximum power, according to exponential decay
+            theta = -np.log(new_fraction_power - self.fraction_power) / exp_parameter
+            self.fraction_power = new_fraction_power
+            print('Theta: ', theta)
+        elif (new_fraction_power > 0.0) and (new_fraction_power <= 1.0):
+            # Attenuate power to a fraction of the maximum power, according to exponential decay"""
+            theta = -np.log(new_fraction_power) / exp_parameter
+            self.fraction_power = new_fraction_power
+            print('Theta: ', theta)
+        
+        elif (new_fraction_power < 0.0) and (new_fraction_power > -5.0):
+            # Attenuate power to the order of magnitude of the maximum power
+            self.fraction_power = np.exp(new_fraction_power)
+            theta = new_fraction_power / exp_parameter
+            print('Theta: ', theta)
+
+        needed_steps = 1600 * theta / 360
+        # difference = self.fraction_power * 1600 - needed_steps    # Absolute scale: store previous fraction power and adjust the steps to meet the new fraction power
+        # steps = int(difference) # 1600 steps for 100% power
+        print(f'Fraction power: {self.fraction_power}, new fraction power: {new_fraction_power}')
+        # print(f'Needed steps: {steps}, difference: {difference}, steps: {steps}')
+        print(f'Needed steps: {needed_steps}')
+
+        command = f'{needed_steps}\n'  # Format the command as 'XXX'
+        self.arduino.write(command.encode())  # Send command to Arduino
+        # response = self.arduino.readline().decode().strip()
+        # print("Arduino says:", response)
+        time.sleep(3)
+
+        current_power = self.get_power()
+        print(f'Power: {current_power*1e6} μW')
+        self.fraction_power = new_fraction_power
+        self.check_power_scale()
+
+    def check_power_scale(self):
+        """Check the power scale and set the power to maximum if needed"""
+        current_power = self.get_power()
+        if current_power > self.max_power:
+            input(f"Found power: {current_power*1e6} μW, setting to maximum power. Press any key to continue")
+            self.fraction_power = 1.0
+            self.position_max = 0.0
+            self.max_power = current_power
+            self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', current_power*1e6)
+
+    def maximum_power(self):
+        """Set the power to maximum"""
+        steps = np.linspace(0, 1600, 10)
+        powers = []
+        angles = []
+        self.send_ttl('H')
+        time.sleep(2)
+        for i, s in enumerate(steps):
+            command = f'{int(steps[1])}\n'    # Fixed step, pass to arduino as int
+            # print(f'Command: {command}')
+            self.arduino.write(command.encode())  # Send command to Arduino
+            time.sleep(3)
+            power = self.get_power()
+            powers.append(power)
+            # print(f'Step: {i}, position: {s}, Power: {round(power * 1e6, 4)} uW')
+            angle = round(360 * s / 1600, 2)
+            angles.append(angle)
+            print(f'Angle: {angle}, Power: {round(power * 1e6, 2)} uW')
+
+        # df = pd.DataFrame({'angle': angles, 'power': powers})
+        # df.to_csv('power_ramp.csv', index=False)
+        
+        position_max = np.argmax(powers)
+        print(f'Max power at position: {position_max}, steps: {steps[position_max]}', )
+        print(f'Moving to position: {steps[position_max] - 1600}')
+        self.fraction_power = 1.0
+        self.position_max = steps[position_max]
+        self.max_power = powers[position_max]
+        self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', powers[position_max]*1e6)
+        command = f'{steps[position_max] - 1600}\n'
+        self.arduino.write(command.encode())  # Send command to Arduino
+        response = self.arduino.readline().decode().strip()
+        print("Arduino says:", response)
+        time.sleep(1)
+        self.send_ttl('L')
+
+    def power_ramp(self):
+        """Power ramp"""
+        name = get_sample_name()
+        while True:
+            filters = get_filters_to_snap()
+            if filters != 0:
+                break
+        npoints = get_nframes()
+        texp = self.cam.get_exposure()
+
+        question = 'Sample:\t' + name + '\nFilter:\t' + FILTERS[filters] 
+        question += 'Exposure:\t' + str(texp) + 's' 
+        question += '\nNumber of points:\t %i \n' %npoints
+        question += '\nTake image with this parameters? y/n\n'
+        if get_yes_no(question):
+            self.wheel.set_filter(filters)
+            rootpath = IMAGE_POWER_SAVE_LOCATION
+            path = saving.check_path_save(rootpath, name, filters=filters)
+            self.open_shutter()
+            self.meter.open(1)
             time.sleep(1)
         self.meter.close()
 
