@@ -13,7 +13,6 @@ import saving
 import SetupSettings
 import motor
 import serial
-
 import sys
 import warnings
 warnings.filterwarnings("ignore", message=".*low contrast image.*")
@@ -25,7 +24,7 @@ import thorlabs_apt as apt
 from utils import *
 from quick_spectra import analyse_spectrum
 from get_trajectories import analyse_trajectories
-
+from analyse_power_ramps import analyse_ramp
 data_struct = np.dtype([('date', 'double'), ('power', 'double'), ('name', str), ('images', (np.uint16, (24, 2048, 2048)))])
 
 global texp
@@ -38,6 +37,12 @@ class Setup:
         self.meter = Meter2.Meter()
         self.settings = pd.DataFrame()
         self.motor = apt.Motor(26002227)
+        self.arduino = serial.Serial("COM6", 9600, timeout=1) # Open serial port to arduino
+        self.fraction_power = 1.0
+        self.max_power = self.get_power()
+        self.position_max = 0.0
+        self.roi = [0, 2048, 0, 2048]  # Default ROI for the whole image
+
         self.cam.set_exposure(0.5)   # Set default exposure time to 0.5s
         
         self.menu = \
@@ -48,6 +53,13 @@ class Setup:
             'a': (self.autofocus, 'Autofocus'),
             'h': (0, 'List of commands'),
             'z': (self.move_zpos, 'Move Z position'),
+            's': (self.toggle_shutter, 'Shutter (open/close)'),
+            't': (self.time_evolution, 'Take time evolution'),
+            'e': (self.set_exposure, 'Set camera exposure'),
+            'p': (self.print_power, 'Get power reading'),
+            'n': (self.attenuate_power, 'Set power attenuation'),
+            'N': (self.maximum_power, 'Set power to maximum'),
+            'r': (self.power_ramp, 'Power ramps'),
             't': (self.time_evolution, 'Take time evolution'),
             'e': (self.set_exposure, 'Set camera exposure'),
             ',': (self.settings_menu, 'Settings menu'),
@@ -69,12 +81,19 @@ class Setup:
         for i in menu.keys():
             print(i + ':\t' + menu[i][1])
 
-    def take_single_frame(self, name, path, filters):
+    def take_single_frame(self, name, path, filters, shutter = True):
         # print('Filters: ', filters)
         self.wheel.set_filter(filters)
         # self.cam.exposure_time(self.cam.exposure)
         # print('Camera exposure: ', round(self.cam.get_exposure(), 2) )
+        if shutter:
+            self.open_shutter()
+        
         data = self.cam.snap(timeout=15)
+    
+        if shutter:
+            self.close_shutter()
+
         # num = saving.save_npy(data, name)
         try:
             power = round(self.meter.read() * 1e6, 4)
@@ -87,7 +106,7 @@ class Setup:
     def take_images(self, name, filters):
         if filters != 0:
             rootpath = IMAGE_SINGLE_SAVE_LOCATION
-            path = saving.check_path_save(rootpath, name)
+            path = saving.check_path_save(rootpath, name, filters=None)
             self.take_single_frame(name, path, filters)
             power = round(self.meter.read() * 1e6, 4)
             self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', power)
@@ -101,7 +120,7 @@ class Setup:
             data_set['name'][0] = name
             rootpath = IMAGE_SET_SAVE_LOCATION
             # print('Before loop: current exposure is %0.2f s \n' %(self.cam.get_exposure()) )
-
+            powers = []
             for i in range(11, -1, -1):
                 self.wheel.set_filter(i+1)
                 print("Current filter: %i" %(i+1))
@@ -109,16 +128,39 @@ class Setup:
                 # print('Current exposure is %0.2f s \n' %(self.cam.exposure) )
                 
             #    camera.exposure_time(FILTERS_EXPOSER[i + 1])
+                self.open_shutter()
                 data_set['images'][0][i] = self.cam.snap(timeout=15)
+                powers.append(round(self.meter.read() * 1e6, 4))
+                self.close_shutter()
             
             save_path = saving.save_tif_set(data_set['images'][0], name, data_set['power'][0])
-            power = round(self.meter.read() * 1e6, 4)
-
-            self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', power)
+            mean_power = np.mean(powers)
+            
+            self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', mean_power)
 
             SetupSettings.write_settings(save_path, self.settings)
             print_image_set(data_set['images'][0])
-            print()
+            return save_path
+
+    def send_ttl(self, command):
+        self.arduino.write(command.encode())  # Send 'H' or 'L'
+        response = self.arduino.readline().decode().strip()
+        # print("Arduino says:", response)
+
+    def toggle_shutter(self):
+        self.send_ttl('T')
+
+    def open_shutter(self):
+        self.send_ttl('H')
+    
+    def close_shutter(self):
+        self.send_ttl('L') 
+
+    def get_power(self):
+        if self.meter.open(1):
+            current_power = round(self.meter.read(), 7)   # Need high precision for low power reading
+        self.meter.close()
+        return current_power
 
     def move_filter(self):
         filters = 0
@@ -126,10 +168,161 @@ class Setup:
             filters = get_filters_to_snap()
         self.wheel.set_filter(filters)
 
+    def print_power(self):
         if self.meter.open(1):
-            print(f'Power: {self.meter.read()} W')
-            time.sleep(1)
+            current_power = self.meter.read()
+            print(f'Power: {current_power*1e6} μW')
+            time.sleep(2)
         self.meter.close()
+        return current_power
+
+    def attenuate_power(self):
+        new_fraction_power = input('Enter the power fraction (0 to 1) \nor order of magnitude (-1 to -4): ')
+        try:
+            new_fraction_power = float(new_fraction_power)
+        except ValueError:
+            print("Invalid input. Please enter a number between 0 and 1")
+        """Set the power to a percentage of the maximum power"""
+        if new_fraction_power > 1.0:
+            raise ValueError("Percentage must be between 0 and 1")
+        
+        exp_parameter = 0.01685    # Exponential decay parameter for the power ramp (conversion factor from desired power to angle)
+        if new_fraction_power > self.fraction_power:
+            # Attenuate power to a fraction of the maximum power, according to exponential decay
+            theta = -np.log(new_fraction_power - self.fraction_power) / exp_parameter
+            self.fraction_power = new_fraction_power
+            print('Theta: ', theta)
+        elif (new_fraction_power > 0.0) and (new_fraction_power <= 1.0):
+            # Attenuate power to a fraction of the maximum power, according to exponential decay"""
+            theta = -np.log(new_fraction_power) / exp_parameter
+            self.fraction_power = new_fraction_power
+            print('Theta: ', theta)
+        
+        elif (new_fraction_power < 0.0) and (new_fraction_power > -5.0):
+            # Attenuate power to the order of magnitude of the maximum power
+            self.fraction_power = np.exp(new_fraction_power)
+            theta = new_fraction_power / exp_parameter
+            print('Theta: ', theta)
+
+        needed_steps = 1600 * theta / 360
+        # difference = self.fraction_power * 1600 - needed_steps    # Absolute scale: store previous fraction power and adjust the steps to meet the new fraction power
+        # steps = int(difference) # 1600 steps for 100% power
+        print(f'Fraction power: {self.fraction_power}, new fraction power: {new_fraction_power}')
+        # print(f'Needed steps: {steps}, difference: {difference}, steps: {steps}')
+        print(f'Needed steps: {needed_steps}')
+
+        command = f'{needed_steps}\n'  # Format the command as 'XXX'
+        self.arduino.write(command.encode())  # Send command to Arduino
+        # response = self.arduino.readline().decode().strip()
+        # print("Arduino says:", response)
+        time.sleep(3)
+
+        current_power = self.get_power()
+        print(f'Power: {current_power*1e6} μW')
+        self.fraction_power = new_fraction_power
+        self.check_power_scale()
+
+    def check_power_scale(self):
+        """Check the power scale and set the power to maximum if needed"""
+        current_power = self.get_power()
+        if current_power > self.max_power:
+            input(f"Found power: {current_power*1e6} μW, setting to maximum power. Press any key to continue")
+            self.fraction_power = 1.0
+            self.position_max = 0.0
+            self.max_power = current_power
+            self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', current_power*1e6)
+
+    def maximum_power(self):
+        """Set the power to maximum"""
+        steps = np.linspace(0, 1600, 10)
+        powers = []
+        angles = []
+        self.send_ttl('H')
+        time.sleep(2)
+        for i, s in enumerate(steps):
+            command = f'{int(steps[1])}\n'    # Fixed step, pass to arduino as int
+            # print(f'Command: {command}')
+            self.arduino.write(command.encode())  # Send command to Arduino
+            time.sleep(3)
+            power = self.get_power()
+            powers.append(power)
+            # print(f'Step: {i}, position: {s}, Power: {round(power * 1e6, 4)} uW')
+            angle = round(360 * s / 1600, 2)
+            angles.append(angle)
+            print(f'Angle: {angle}, Power: {round(power * 1e6, 2)} uW')
+
+        # df = pd.DataFrame({'angle': angles, 'power': powers})
+        # df.to_csv('power_ramp.csv', index=False)
+        
+        position_max = np.argmax(powers)
+        print(f'Max power at position: {position_max}, steps: {steps[position_max]}', )
+        print(f'Moving to position: {steps[position_max] - 1600}')
+        self.fraction_power = 1.0
+        self.position_max = steps[position_max]
+        self.max_power = powers[position_max]
+        self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', powers[position_max]*1e6)
+        command = f'{steps[position_max] - 1600}\n'
+        self.arduino.write(command.encode())  # Send command to Arduino
+        response = self.arduino.readline().decode().strip()
+        print("Arduino says:", response)
+        time.sleep(1)
+        self.send_ttl('L')
+
+    def power_ramp(self):
+        """Power ramp"""
+        name = get_sample_name()
+        while True:
+            filters = get_filters_to_snap()
+            if filters != 0:
+                break
+        npoints = get_nframes()
+        texp = self.cam.get_exposure()
+
+        question = 'Sample:\t' + name + '\nFilter:\t' + FILTERS[filters] 
+        question += 'Exposure:\t' + str(texp) + 's' 
+        question += '\nNumber of points:\t %i \n' %npoints
+        question += '\nTake image with this parameters? y/n\n'
+        if get_yes_no(question):
+            self.wheel.set_filter(filters)
+            rootpath = IMAGE_POWER_SAVE_LOCATION
+            path = saving.check_path_save(rootpath, name, filters=filters)
+            self.open_shutter()
+            self.meter.open(1)
+            time.sleep(1)
+            steps = np.linspace(0, 1600, npoints)
+            first_power = round(self.meter.read(), 7)
+            self.take_single_frame(name, path, filters, shutter=False) # Get initial image before attenuating
+            powers = [first_power * 1e6]   # Get initial power
+            angles = [0]
+
+            # Iterate over steps up to last one (repeated unattenuated power)
+            for i, s in enumerate(steps[:-1]):
+                command = f'{int(steps[1])}\n'
+                angles.append(round(s * 360 / 1600, 1))
+                self.arduino.write(command.encode())  # Send command to Arduino
+                time.sleep(3)
+                power = round(self.meter.read(), 7)   # Need high precision for low power reading
+                powers.append(power*1e6)
+                print(f"Frame nr. {i}, Power: {round(power * 1e6, 2)} uW")
+                self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', power*1e6)
+                data = self.cam.snap(timeout=15)
+                saving.single_tif_save(data, path, name, round(power * 1e6, 2), filters)
+        
+        else:
+            return
+        
+        self.arduino.write(command.encode())   # Advance one more step (without taking image) to recover the unattenuated power
+
+        self.meter.close()
+        self.close_shutter()
+        SetupSettings.write_settings(path, self.settings)
+       
+        df_power = pd.DataFrame({'angle': angles, 'power(uW)': powers})   # Record power and angle and store in csv file
+        df_power.to_csv(path + '\power_ramp.csv', index=False)         
+        path_sample = os.path.split(path)[0] + '/'
+        print('Calling analyse_ramp for path: ', path_sample)
+        
+        analyse_ramp(path_sample, roi=self.roi)
 
     def open_cam(self):
         self.cam.open()
@@ -156,6 +349,9 @@ class Setup:
         self.cam.close()
         self.wheel.close()
         self.meter.close()
+        self.arduino.close()
+
+
     def autofocus(self):
         self.open_shutter()
         motor.main_autofocus(self.cam, self.motor, self.wheel)
@@ -221,11 +417,35 @@ class Setup:
         question += '\nTake image with this parameters? y/n\n'
         if get_yes_no(question):
             rootpath = IMAGE_TIMERUN_SAVE_LOCATION
-            path = saving.check_path_save(rootpath, name)
+            path = saving.check_path_save(rootpath, name, filters=filters)
+            # mean_intensities = []
+            self.open_shutter()
+
+            # plt.ion()
+            # fig, ax = plt.subplots()
+            # line, = ax.plot([], [], 'b-o')  # Initialize an empty line plot
+            # ax.set_xlabel('Frame number')
+            # ax.set_ylabel('Mean intensity')
+
             for i in range(nframes):
                 print("Frame nr. %i" %i)
-                self.take_single_frame(name, path, filters)
+                self.take_single_frame(name, path, filters, shutter=False)
+                img = img[self.roi[0]: self.roi[1], self.roi[2]: self.roi[3]]
+                # mean_intensities.append(np.mean(img))
+                # line.set_data(range(len(mean_intensities)), mean_intensities)
+                # ax.relim()              # Recompute the data limits
+                # ax.autoscale_view()     # Rescale the view to the new data
+                # plt.draw()              # Update the plot with new data
+            
+            self.close_shutter()
+            # plt.ioff()
+            # plt.show()
+
             SetupSettings.write_settings(path, self.settings)
+            path_sample = os.path.split(path)[0] + '/'    # Get path to sample folder, this way the spectrum analysis is done for all measurements in the same folder
+            print('Calling analyse_spectrum for path: ', path_sample) 
+            # analyse_trajectories(path_sample)
+
             # self.close_all_devices()
             
     # def take_sequence(self):
@@ -326,5 +546,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 
