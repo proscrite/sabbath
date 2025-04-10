@@ -11,95 +11,22 @@ import Wheel
 import Meter2    # Meter2 for TLPMX (new API version), Meter for TLMP (older version)
 import saving
 import SetupSettings
-#matplotlib.interactive(True)
+import motor
+import serial
+
+import sys
+import warnings
+warnings.filterwarnings("ignore", message=".*low contrast image.*")
+sys.path.append(r'C:\Users\owner\Documents\thorlabs_apt-master')
+sys.path.append(r'G:\My Drive\Ba Tagging')
+sys.path.append(r'G:\My Drive\Ba Tagging\code\imag_analisis')
+
+import thorlabs_apt as apt
+from utils import *
+from quick_spectra import analyse_spectrum
+from get_trajectories import analyse_trajectories
 
 data_struct = np.dtype([('date', 'double'), ('power', 'double'), ('name', str), ('images', (np.uint16, (24, 2048, 2048)))])
-
-def time_date():
-    return time.strftime(TIME_FORMAT)
-
-def tif_file_name(filter_num, use_time=False):
-    if use_time:
-        return str(filter_num) + "_" + FILTERS[filter_num] + "_" + time_date() + ".tif"
-    return str(filter_num) + "_" + FILTERS[filter_num] + ".tif"
-
-def get_yes_no(question):
-    while True:
-        key = input(question)
-        if key == 'y':
-            return True
-        elif key == 'n':
-            return False
-        else:
-            print('invalid key')
-
-def get_sample_name():
-    while True:
-        print_dict(SAMPLES)
-        key = input('choose sample:\n')
-        if (key.isnumeric()) and (int(key) == 0):
-            return input('Write sample name\n')
-        elif (key.isnumeric()) and (int(key) in SAMPLES):
-            return SAMPLES[int(key)]
-        elif (key == 'q'):
-            return 'exit'
-        else:
-            print('invalid key')
-
-def get_filters_to_snap():
-    while True:
-        print_dict(FILTERS)
-        print('0:\tAll filters')
-        key = input('choose filter to snap:\n')
-        if (key.isnumeric()) and (int(key) == 0):
-            return 0
-        elif (key.isnumeric()) and (int(key) in FILTERS):
-            return int(key)
-        else:
-            print('invalid key')
-
-def get_nframes():
-    while True:
-        key = input('choose number of frames (default 400):\n')
-        if (key.isnumeric()) and (int(key) == 0):
-            return 400
-        elif (key.isnumeric()):
-            return int(key)
-        else:
-            print('invalid key')
-
-def get_expTime():
-    while True:
-        key = input('Choose exposure time (default 0.5):\n')
-        if (key.isnumeric()) and (int(key) == 0):
-            return 0.5
-        elif (key.isnumeric()):
-            return key
-        elif type(literal_eval(key)) == float:
-            return key
-        else:
-            print('invalid key')
-
-def print_dict(dict):
-    print()
-    for i in dict:
-        print(str(i) + ':\t' + dict[i])
-
-
-def print_image_set(image_set):
-    fig_12img, ax_12img = plt.subplots(3, 4)
-    fig_12img.tight_layout()
-    cut = 500
-
-    for row in range(3):
-        for col in range(4):
-            area = image_set[col + row * 4, cut:2048 - cut, cut:2048 - cut]
-            img = ax_12img[row, col].imshow(area)
-            title = str(FILTERS_BANDS[col + row * 4 + 1][0]) + '[nm], ' + str(FILTERS_BANDS[col + row * 4 + 1][1]) + '[nm]'
-            ax_12img[row, col].set_title(title)
-            ax_12img[row, col].axis('off')
-            fig_12img.colorbar(img, ax=ax_12img[row, col])
-    plt.show()  # block=False
 
 global texp
 
@@ -110,21 +37,24 @@ class Setup:
         self.wheel = Wheel.Wheel()
         self.meter = Meter2.Meter()
         self.settings = pd.DataFrame()
+        self.motor = apt.Motor(26002227)
+        self.cam.set_exposure(0.5)   # Set default exposure time to 0.5s
         
         self.menu = \
             {
-            'i': (self.take_spectra, 'Taking Spectra'),
-            'f': (self.image_filter, 'Take single filter'),
-            'a': (self.test, 'A test function'),
+            'i': (self.take_spectra, 'Take Spectra'),
+            'f': (self.image_filter, 'Take image of single filter'),
+            'F': (self.move_filter, 'Move filter wheel'),
+            'a': (self.autofocus, 'Autofocus'),
             'h': (0, 'List of commands'),
-            'p': (self.mean_power, 'Get power reading'),
-            'cam': (self.show_prop_camera, 'Show camera proerties'),
-            's': (self.set_cam_properties, 'Set camera property'),
-            'e': (self.set_exposure, 'Set camera exposure'),
+            'z': (self.move_zpos, 'Move Z position'),
             't': (self.time_evolution, 'Take time evolution'),
-            's': (self.take_sequence, 'Take sequence'),
+            'e': (self.set_exposure, 'Set camera exposure'),
             ',': (self.settings_menu, 'Settings menu'),
             'q': (self.leave, 'quit')
+            # 'cam': (self.show_prop_camera, 'Show camera proerties'),
+            # 's': (self.set_cam_properties, 'Set camera property'),
+            # 's': (self.take_sequence, 'Take sequence'),
         }
 
 
@@ -146,7 +76,13 @@ class Setup:
         # print('Camera exposure: ', round(self.cam.get_exposure(), 2) )
         data = self.cam.snap(timeout=15)
         # num = saving.save_npy(data, name)
-        saving.single_tif_save(data, path, name, filters)
+        try:
+            power = round(self.meter.read() * 1e6, 4)
+        except: 
+            power = None        
+            print('Cannot read power')
+        saving.single_tif_save(data, path, name, power, filters)
+        return data
 
     def take_images(self, name, filters):
         if filters != 0:
@@ -157,6 +93,7 @@ class Setup:
             self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', power)
             
             SetupSettings.write_settings(path, self.settings)
+            return path
 
         else:
             data_set = np.zeros(1, dtype=data_struct)
@@ -183,7 +120,12 @@ class Setup:
             print_image_set(data_set['images'][0])
             print()
 
-    def mean_power(self):
+    def move_filter(self):
+        filters = 0
+        while filters == 0:
+            filters = get_filters_to_snap()
+        self.wheel.set_filter(filters)
+
         if self.meter.open(1):
             print(f'Power: {self.meter.read()} W')
             time.sleep(1)
@@ -214,21 +156,34 @@ class Setup:
         self.cam.close()
         self.wheel.close()
         self.meter.close()
+    def autofocus(self):
+        self.open_shutter()
+        motor.main_autofocus(self.cam, self.motor, self.wheel)
+        self.close_shutter()
 
     def take_spectra(self):
-        while True:
-            name = get_sample_name()
-            filters = 0
-        
-            question = 'Sample:\t' + name + '\nAll filters\n' 
-            question += '\nTake image with this parameters? y/n\n'
-            if get_yes_no(question):
-                if self.open_all_devices() is False:
-                    return
-                self.take_images(name, filters)
-                self.close_all_devices()
-            else:
-                break
+        name = get_sample_name()
+        filters = 0
+        texp = 7.0
+        self.cam.set_exposure(texp)   # Set exposure to spectra taking value
+        self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
+    
+        question = 'Sample:\t' + name + '\nAll filters\n'
+        question += 'Exposure:\t' + str(texp) + 's' 
+        question += '\nTake image with this parameters? y/n\n'
+        if get_yes_no(question):
+            if self.open_all_devices() is False:
+                return
+            pathsave = self.take_images(name, filters)
+            # self.close_all_devices()
+            path_sample = os.path.split(pathsave)[0] + '/'    # Get path to sample folder, this way the spectrum analysis is done for all measurements in the same folder
+            print('Calling analyse_spectrum for path: ', path_sample) 
+            # analyse_spectrum(path_sample)
+
+            self.cam.set_exposure(0.5)   # After saving, reset exposure to default value
+            self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', 0.5)
+        else:
+            pass
 
     def image_filter(self):
         while True:
@@ -243,12 +198,13 @@ class Setup:
                 question = 'Sample:\t' + name + '\nFilter:\t' + FILTERS[filters]
             #question += 'Current exposure is %0.2f s, do you want to change it? (y/n) \n' %(camera.exposure)
             question += '\nTake image with this parameters? y/n\n'
-            while get_yes_no(question):
+            if get_yes_no(question):
                 if self.open_all_devices() is False:
                     return
                 self.take_images(name, filters)
                 # self.close_all_devices()
             else:
+                print('Open all devices failed')
                 break
             
     def time_evolution(self):
@@ -258,7 +214,9 @@ class Setup:
             if filters != 0:
                 break
         nframes = get_nframes()
+        texp = self.cam.get_exposure()
         question = 'Sample:\t' + name + '\nFilter:\t' + FILTERS[filters] 
+        question += 'Exposure:\t' + str(texp) + 's' 
         question += '\nNumber of frames:\t %i \n' %nframes
         question += '\nTake image with this parameters? y/n\n'
         if get_yes_no(question):
@@ -270,21 +228,25 @@ class Setup:
             SetupSettings.write_settings(path, self.settings)
             # self.close_all_devices()
             
-    def take_sequence(self):
-        if self.open_all_devices() is False:
-                return
-        print('Devices open, taking sequence')
-        data = self.cam.take_sequence()
-        print(data)
+    # def take_sequence(self):
+    #     if self.open_all_devices() is False:
+    #             return
+    #     print('Devices open, taking sequence')
+    #     data = self.cam.take_sequence()
+    #     print(data)
+       
 
     def set_exposure(self):
         if self.cam.is_opened() is False:
             return
-        question = 'Current exposure is %0.2f s, do you want to change it? (y/n) \n' %(self.cam.get_exposure())
-        if get_yes_no(question):
+        question = 'Current exposure is %0.2f s \n' %(self.cam.get_exposure())
+        print(question)
+        try:
             texp = float(get_expTime())
             self.cam.set_exposure(texp)
             self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
+        except ValueError or TypeError or NameError:
+            return
         # self.cam.close()
 
     def show_prop_camera(self):
@@ -300,25 +262,45 @@ class Setup:
         camera.get_all_attribute_values()
         camera.close()
 
-    def test():
-        #wheel.open()
-        print(meter.read())
-        #if meter.open():
-            #time.sleep(10)
-        #   t = time.time()
-        #  print(bool(meter))
-            #print(meter.read())
-        # print(time.time() - t)
-        meter.close()
-
     def leave(self, code=0):
         self.close_all_devices()
         exit(code)
 
+    def read_zpos(self):
+        """Return z position from motor"""
+        z_pos = round(self.motor.position, 3)
+        print("Current Z position: ", z_pos)
+        return z_pos
+    
+    def move_zpos(self):
+        z_pos = self.read_zpos()
+        try:
+            new_zpos = input('Current Z position is %0.3f mm, enter to move to new position\n' %z_pos)
+            new_zpos = float(new_zpos)
+        except ValueError:
+            print('Invalid input, please input float number')
+            return
+        if new_zpos > 25.0:
+            print('Z position too high, max value is 21.0 mm')
+            return
+        else:
+            self.motor.move_to(new_zpos, blocking=True)
+            print('New Z position: ', round(self.motor.position, 3))
+            self.settings = SetupSettings.add_settings_value(self.settings, 'ZPOS(mm)', new_zpos)
+        
+    
     def init_settings(self):
         fin = SetupSettings.find_recent_settings()
         print('Loading recent settings at :', fin)
         self.settings = SetupSettings.read_settings(fin)
+
+        if self.motor is not None:
+            z_pos = self.read_zpos()
+            self.settings = SetupSettings.add_settings_value(self.settings, 'ZPOS(mm)', z_pos)
+
+        texp = self.cam.get_exposure()
+        self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
+
 
     def settings_menu(self):
         self.settings = SetupSettings.edit_settings(self.settings)
@@ -344,5 +326,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 
