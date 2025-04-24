@@ -1,4 +1,4 @@
-from Constants import *
+from microscope_control.Constants import *
 from ast import literal_eval
 import matplotlib.pyplot as plt
 def time_date():
@@ -19,18 +19,23 @@ def get_yes_no(question):
         else:
             print('invalid key')
 
-def get_expTime():
-    while True:
-        key = input('Choose exposure time, press any letter to cancel:\n')
-        if (key.isnumeric()) and (int(key) == 0):
-            return 0.5
-        elif (key.isnumeric()):
-            'Returning to main'
-            return key
-        elif type(literal_eval(key)) == float:
-            return key
-        else:
-            print('invalid key')
+def check_expTime(current_exposure=None):
+    question = 'Current exposure is %0.2f s \n' %(current_exposure)
+    print(question)
+    try:
+        while True:
+            key = input('Choose exposure time, press any letter to cancel:\n')
+            if (key.isnumeric()) and (int(key) == 0):
+                return 0.5
+            elif (key.isnumeric()):
+                'Returning to main'
+                return key
+            elif type(literal_eval(key)) == float:
+                return key
+            else:
+                print('invalid key')
+    except ValueError or TypeError or NameError:
+        return
 
 def get_sample_name():
     while True:
