@@ -1,11 +1,11 @@
 import time
 
-from powerm import TLPMX
+from microscope_control.powerm import TLPMX
 import ctypes
 from ctypes import cdll,c_long, c_ulong, c_uint32,byref,create_string_buffer,c_bool,c_char_p,c_int,c_int16,c_double, sizeof, c_voidp
-from powerm.TLPMX import TLPM_DEFAULT_CHANNEL
+from microscope_control.powerm.TLPMX import TLPM_DEFAULT_CHANNEL
 
-from Constants import *
+from microscope_control.Constants import *
 
 wavelength = c_double(515.0)
 

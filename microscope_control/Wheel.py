@@ -1,5 +1,5 @@
-import FWxC_COMMAND_LIB as fwxc
-from Constants import *
+from microscope_control import FWxC_COMMAND_LIB as fwxc
+from microscope_control.Constants import *
 import time
 
 

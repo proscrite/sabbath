@@ -1,7 +1,7 @@
 import time
 import os
 import numpy as np
-from Constants import *
+from microscope_control.Constants import *
 #import cv2
 from PIL import Image
 from skimage import io

@@ -1,4 +1,4 @@
-from Constants import *
+from microscope_control.Constants import *
 import pandas as pd 
 from datetime import datetime
 import os
