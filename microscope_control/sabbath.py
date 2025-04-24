@@ -6,6 +6,7 @@ from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
+from kivy.uix.widget import Widget
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
 from functools import wraps, partial
@@ -179,8 +180,9 @@ class Sabbath(App):
 
     # Helper to show a choice-button popup
     def _show_choice_popup(self, *, title, current_text, choices, on_success, size_hint):
-        layout = GridLayout(cols=1, padding=10, spacing=10)
+        layout = GridLayout(cols=2, padding=10, spacing=10)
         layout.add_widget(Label(text=current_text))
+        layout.add_widget(Widget(size_hint_y=None, height=0))
         popup = Popup(title=title, content=layout, size_hint=size_hint)
 
         for label, val in choices:
@@ -196,7 +198,7 @@ class Sabbath(App):
         layout.add_widget(Label(text=current_text))
 
         # 1) Grid of choice-buttons
-        grid = GridLayout(cols= len(choices), spacing=5, size_hint_y=None)
+        grid = GridLayout(cols= 3, spacing=5, size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
         for label, val in choices:
             btn = Button(text=label, size_hint_y=None, height=40)
@@ -244,10 +246,11 @@ class Sabbath(App):
         pass
 
     @choice_popup(
-        title="Select Filter (1 - 12)",
-        get_current=lambda self: f"Current Filter: {self.setup.filter_id}",
-        choices=[(str(k), k) for k in FILTERS.keys()],
-        on_success=lambda self, v: (self.setup.move_filter(v), setattr(self.label_filter_status, 'text', f"Filter: {v}"))
+        title=f"Select Filter (1 - 12)",
+        get_current= lambda self: f"Current Filter: {self.setup.filter_id}",
+        choices=[(str(k) + ' - ' + v.split('_')[0].replace('Center-', ''), k)
+                  for k, v in FILTERS.items()],
+        on_success=lambda self, v: (self.setup.move_filter(v), setattr(self.label_filter_status, 'text', f"Filter: {v} - {FILTERS[v]}"))
     )
     def choose_filter(self, *_):
         pass
@@ -255,9 +258,9 @@ class Sabbath(App):
     @combo_popup(
         title="Choose or Enter Sample",
         get_current=lambda self: f"Current: {self.setup.settings.get('SAMPLE_NAME','')}",
-        hint="Type sample name…",
+        hint="Or type new sample name…",
         validate=lambda s: s if s else (_ for _ in ()).throw(ValueError()),
-        choices=[(str(k), SAMPLES[k]) for k in SAMPLES],
+        choices=[(str(k) + ' - ' + SAMPLES[k], SAMPLES[k]) for k in SAMPLES if k != 'q'],
         on_success=lambda self, v: (
             setattr(self.label_sample_status,'text', f"Sample: {v}"),
             self.setup.settings.__setitem__('SAMPLE_NAME', v)
