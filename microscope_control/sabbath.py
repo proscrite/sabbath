@@ -8,20 +8,76 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.checkbox import CheckBox
-from functools import partial
+from functools import wraps, partial
 import time
 from microscope_control.Constants import *
-# from microscope_control.utils import *
+
+def text_popup(title, hint, get_current, validate, on_success, size_hint=(0.5, 0.5)):
+    """
+    Decorator to replace a manage_* method with a text-input popup.
+    - title: popup window title
+    - hint: placeholder text
+    - get_current: fn(self) -> str for current value label
+    - validate: fn(str) -> typed value or raise
+    - on_success: fn(self, value) -> side-effects setting value
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            self._show_input_popup(
+                title=title,
+                current_text=get_current(self),
+                hint=hint,
+                validate=validate,
+                on_success=lambda v: on_success(self, v),
+                size_hint=size_hint
+            )
+        return wrapper
+    return decorator
+
+def choice_popup(title, get_current, choices, on_success, size_hint=(0.6, 0.6)):
+    """
+    Decorator to replace a manage_* or choose_* method with a choice-button popup.
+    - title: popup window title
+    - get_current: fn(self) -> str for current value label
+    - choices: list of (button_text, value)
+    - on_success: fn(self, value) -> side-effects
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            self._show_choice_popup(
+                title=title,
+                current_text=get_current(self),
+                choices=choices,
+                on_success=lambda v: on_success(self, v),
+                size_hint=size_hint
+            )
+        return wrapper
+    return decorator
+
+def combo_popup(title, get_current, hint, validate, choices, on_success, size_hint=(0.8,0.8)):
+    def deco(fn):
+        @wraps(fn)
+        def wrapped(self, *args, **kwargs):
+            self._show_combo_popup(
+                title=title,
+                current_text=get_current(self),
+                hint=hint,
+                validate=validate,
+                choices=choices,
+                on_success=lambda v: on_success(self, v),
+                size_hint=size_hint
+            )
+        return wrapped
+    return deco
 
 class Sabbath(App):
     def build(self):
         self.setup = Setup()
         self.setup.init_settings()
         self.setup.open_all_devices()
-        # Main layout
         self.root_layout = FloatLayout()
-        # Status labels layout
         self.status_layout = GridLayout(cols=2, padding=10, spacing=10,
                                         size_hint=(None, None),
                                         size=(600, 100),              # Adjust size of grid manually
@@ -46,15 +102,14 @@ class Sabbath(App):
         self.add_button('Set Filter', self.choose_filter)
         self.add_button('Set Exposure', self.manage_exposure)
         self.add_button('Move Z Position', self.manage_zpos)
-        self.add_button('Print Power', self.print_power_label)
+        self.add_button('Refresh Power reading', self.print_power_label)
         self.add_button('Toggle Shutter', self.manage_toggle_shutter)
         self.add_button('Settings', self.show_settings_menu)
         
         self.root_layout.add_widget(self.button_layout)
-        
-        # Return the main layout
         return self.root_layout
-    
+
+        
     def add_button(self, text, func):
         button = Button(text=text, size_hint=(None, None), width=200, height=50)
         button.bind(on_press=lambda instance: func())
@@ -93,58 +148,6 @@ class Sabbath(App):
         self.label_sample_status = Label(text=f"Sample: {sample_name}", font_size=18)
         self.status_layout.add_widget(self.label_sample_status)
 
-    def manage_spectra(self, *_):
-        layout = GridLayout(rows=2, padding=10, spacing=10)
-        side_layout = GridLayout(cols=1, padding=10, spacing=10)
-        label_status_sample = Label(text=f"Current sample: {getattr(self.setup, 'filter_id', '?')}", font_size=18)
-
-        sample_input = TextInput(hint_text="Or enter Filter ID", multiline=False)
-        popup = Popup(title='Select sample ID', content=layout, size_hint=(0.8, 0.8))
-
-        grid = GridLayout(cols=4, spacing=10, size_hint_y=None)
-        grid.bind(minimum_height=grid.setter('height'))
-
-        # Shared callback function
-        def set_sample(value_or_widget, popup, label, *_):
-            try:            
-                if isinstance(value_or_widget, TextInput):
-                    sample_id = int(value_or_widget.text)
-                    value = SAMPLES[sample_id]
-                    
-                else:
-                    value = SAMPLES[value_or_widget]
-
-                self.label_sample_status.text = f"Sample: {value}"
-                label.text = f"Setting sample... ({value})"
-                # self.setup.move_filter(value)
-                popup.dismiss()
-            except Exception as e:
-                print(f"Invalid filter value: {e}")
-                if isinstance(value, Button):
-                    value.text = "Invalid"
-                else:
-                    sample_input.text = "Invalid input"
-
-        # Add filter buttons dynamically
-        for fid, name in SAMPLES.items():
-            btn = Button(text=str(fid), size_hint_y=None, size_hint_x = 0.2, height=30)
-            # Bind a unique partial per button
-            btn.bind(on_press=partial(set_sample, fid, popup, label_status_sample))
-            grid.add_widget(btn)
-            filter_center = name.split('_')[0].replace('Center-', '')
-            grid.add_widget(Label(text=str(filter_center), size_hint_y=None, height=30))
-
-        # Handle text input + Enter
-        sample_input.bind(on_text_validate=partial(set_sample, sample_input, popup, label_status_sample))
-
-        layout.add_widget(side_layout)
-        layout.add_widget(grid)
-
-        side_layout.add_widget(label_status_sample)
-        side_layout.add_widget(sample_input)
-
-        popup.open()
- 
     def print_power_label(self, *_):
         power = self.setup.print_power()
         if hasattr(self, 'power_label'):
@@ -152,133 +155,116 @@ class Sabbath(App):
         else:
             self.status_layout.add_widget(self.power_label)
 
-    def manage_toggle_shutter(self, *_):
-        shutter_state = self.setup.shutter_status
-        if shutter_state:
-            print("Shutter is currently open. Closing it...")
-            self.setup.toggle_shutter()
-        else:
-            print("Shutter is currently closed. Opening it...")
-            self.setup.toggle_shutter()
-        shutter_state = self.setup.shutter_status
+    # Helper to show a text-input popup
+    def _show_input_popup(self, *, title, current_text, hint, validate, on_success, size_hint):
+        layout = GridLayout(cols=1, padding=10, spacing=10)
+        layout.add_widget(Label(text=current_text))
+        ti = TextInput(hint_text=hint, multiline=False)
+        btn = Button(text="Set")
+        popup = Popup(title=title, content=layout, size_hint=size_hint)
 
-        self.label_shutter_status.text = f"Shutter: {'Open' if shutter_state else 'Closed'}"
-        self.print_power_label()
-
-    def manage_zpos(self, *_):
-        # Create a popup for Z position management
-        zpos = self.setup.read_zpos()
-        layout = GridLayout(cols=2, padding=10, spacing=10)
-        side_layout = GridLayout(cols=1, padding=10, spacing=10)
-        label_status_z = Label(text=f"Current Z Position: {zpos}", font_size=18)
-
-        zpos_input = TextInput(hint_text="Enter Z Position", multiline=False)
-        zpos_button = Button(text="Set Z Position")
-        popup = Popup(title='Set Z Position', content=layout, size_hint=(0.5, 0.5))
-
-        def call_move_zpos_with_input(textinput, popup, label, *_):
+        def _do_set(*_):
             try:
-                value = float(textinput.text)
-                label.text += '\nMoving Z Position...'
-                self.setup.move_zpos(value)
-                self.label_status_z.text = f"Z Position: {self.setup.read_zpos()}"
+                val = validate(ti.text)
+                on_success(val)
                 popup.dismiss()
-            except ValueError:
-                textinput.text = "Invalid input"
+            except Exception:
+                ti.text = "❌ invalid"
 
-        handler = partial(call_move_zpos_with_input, zpos_input, popup, label_status_z)
-        zpos_input.bind(on_text_validate=handler)
-        zpos_button.bind(on_press=handler)
+        ti.bind(on_text_validate=_do_set)
+        btn.bind(on_press=_do_set)
+        layout.add_widget(ti)
+        layout.add_widget(btn)
+        popup.open()
 
-        layout.add_widget(zpos_input)
-        side_layout.add_widget(label_status_z)
-        side_layout.add_widget(zpos_button)
-        layout.add_widget(side_layout)
+    # Helper to show a choice-button popup
+    def _show_choice_popup(self, *, title, current_text, choices, on_success, size_hint):
+        layout = GridLayout(cols=1, padding=10, spacing=10)
+        layout.add_widget(Label(text=current_text))
+        popup = Popup(title=title, content=layout, size_hint=size_hint)
+
+        for label, val in choices:
+            btn = Button(text=label, size_hint_y=None, height=40)
+            btn.bind(on_press=lambda *_ ,v=val: (on_success(v), popup.dismiss()))
+            layout.add_widget(btn)
 
         popup.open()
 
-    def manage_exposure(self, *_):
-        # Create a popup for exposure management
-        layout = GridLayout(cols=2, padding=10, spacing=10)
-        side_layout = GridLayout(cols=1, padding=10, spacing=10)
-        label_status_exposure = Label(text=f"Current Exposure: {self.setup.texp}", font_size=18)
+    def _show_combo_popup(self, *, title, current_text, hint,
+                        validate, choices, on_success, size_hint):
+        layout = GridLayout(cols=1, padding=10, spacing=10)
+        layout.add_widget(Label(text=current_text))
 
-        exposure_input = TextInput(hint_text="Enter Exposure Time", multiline=False)
-        exposure_button = Button(text="Set Exposure Time")
-        popup = Popup(title='Set Exposure Time', content=layout, size_hint=(0.5, 0.5))
-
-        def call_set_exposure_with_input(textinput, popup, label, *_):
-            try:
-                value = float(textinput.text)
-                label.text += '\nSetting Exposure...'
-                self.setup.set_exposure(value)
-                self.label_exposure_status.text = f"Exposure: {value:.2f} s"
-                popup.dismiss()
-            except ValueError:
-                textinput.text = "Invalid input"
-
-        handler = partial(call_set_exposure_with_input, exposure_input, popup, label_status_exposure)
-        exposure_input.bind(on_text_validate=handler)
-        exposure_button.bind(on_press=handler)
-
-        layout.add_widget(exposure_input)
-        side_layout.add_widget(label_status_exposure)
-        side_layout.add_widget(exposure_button)
-        layout.add_widget(side_layout)
-
-        popup.open()
-
-    def choose_filter(self, *_):
-        layout = GridLayout(cols=2, padding=10, spacing=10)
-        side_layout = GridLayout(cols=1, padding=10, spacing=10)
-        label_status_filter = Label(text=f"Current Filter: {getattr(self.setup, 'filter_id', '?')}", font_size=18)
-
-        filter_input = TextInput(hint_text="Or enter Filter ID", multiline=False)
-        popup = Popup(title='Set Filter ID', content=layout, size_hint=(0.8, 0.8))
-
-        grid = GridLayout(cols=4, spacing=10, size_hint_y=None)
+        # 1) Grid of choice-buttons
+        grid = GridLayout(cols= len(choices), spacing=5, size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
-
-        # Shared callback function
-        def set_filter(value_or_widget, popup, label, *_):
-            try:            
-                if isinstance(value_or_widget, TextInput):
-                    value = int(value_or_widget.text)
-                else:
-                    value = int(value_or_widget)
-
-                assert value in range(1, 13)
-                label.text = f"Setting Filter... ({value})"
-                print(f"Setting filter to {value}")
-                self.setup.move_filter(value)
-                self.label_filter_status.text = f"Filter: {value}"
-                popup.dismiss()
-            except Exception as e:
-                print(f"Invalid filter value: {e}")
-                if isinstance(value, Button):
-                    value.text = "Invalid"
-                else:
-                    filter_input.text = "Invalid input"
-
-        # Add filter buttons dynamically
-        for fid, name in FILTERS.items():
-            btn = Button(text=str(fid), size_hint_y=None, height=30)
-            # Bind a unique partial per button
-            btn.bind(on_press=partial(set_filter, fid, popup, label_status_filter))
+        for label, val in choices:
+            btn = Button(text=label, size_hint_y=None, height=40)
+            btn.bind(on_press=lambda *_ ,v=val: (on_success(v), popup.dismiss()))
             grid.add_widget(btn)
-            filter_center = name.split('_')[0].replace('Center-', '')
-            grid.add_widget(Label(text=str(filter_center), size_hint_y=None, height=30))
-
-        # Handle text input + Enter
-        filter_input.bind(on_text_validate=partial(set_filter, filter_input, popup, label_status_filter))
-
-        layout.add_widget(side_layout)
         layout.add_widget(grid)
 
-        side_layout.add_widget(label_status_filter)
-        side_layout.add_widget(filter_input)
+        # 2) Text input + Set button
+        ti = TextInput(hint_text=hint, multiline=False)
+        btn = Button(text="Set")
+        def _do_set(*_):
+            try:
+                v = validate(ti.text)
+                on_success(v)
+                popup.dismiss()
+            except:
+                ti.text = "❌ invalid"
+        ti.bind(on_text_validate=_do_set)
+        btn.bind(on_press=_do_set)
+        layout.add_widget(ti)
+        layout.add_widget(btn)
 
+        popup = Popup(title=title, content=layout, size_hint=size_hint)
         popup.open()
+
+
+    @text_popup(
+        title="Set Z Position (0 - 22 mm)",
+        hint="New Z (mm)",
+        get_current=lambda self: f"Current Z: {self.setup.read_zpos():.3f} mm",
+        validate=float,
+        on_success=lambda self, v: (self.setup.move_zpos(v), setattr(self.label_status_z, 'text', f"Z Position: {v:.3f}"))
+    )
+    def manage_zpos(self, *_):
+        pass
+
+    @text_popup(
+        title="Set Exposure Time (0.1 - 7 s)",
+        hint="New exposure (s)",
+        get_current=lambda self: f"Current Exposure: {self.setup.texp:.3f} s",
+        validate=float,
+        on_success=lambda self, v: (self.setup.set_exposure(v), setattr(self.label_exposure_status, 'text', f"Exposure: {v:.2f} s"))
+    )
+    def manage_exposure(self, *_):
+        pass
+
+    @choice_popup(
+        title="Select Filter (1 - 12)",
+        get_current=lambda self: f"Current Filter: {self.setup.filter_id}",
+        choices=[(str(k), k) for k in FILTERS.keys()],
+        on_success=lambda self, v: (self.setup.move_filter(v), setattr(self.label_filter_status, 'text', f"Filter: {v}"))
+    )
+    def choose_filter(self, *_):
+        pass
+
+    @combo_popup(
+        title="Choose or Enter Sample",
+        get_current=lambda self: f"Current: {self.setup.settings.get('SAMPLE_NAME','')}",
+        hint="Type sample name…",
+        validate=lambda s: s if s else (_ for _ in ()).throw(ValueError()),
+        choices=[(str(k), SAMPLES[k]) for k in SAMPLES],
+        on_success=lambda self, v: (
+            setattr(self.label_sample_status,'text', f"Sample: {v}"),
+            self.setup.settings.__setitem__('SAMPLE_NAME', v)
+        )
+    )
+    def manage_spectra(self, *_):
+        pass
 
     def show_settings_menu(self, *_):
         settings_df = self.setup.settings
@@ -325,6 +311,19 @@ class Sabbath(App):
 
         main_popup = Popup(title='Settings', content=popup_layout, size_hint=(0.7, 0.7))
         main_popup.open()
+
+    def manage_toggle_shutter(self, *_):
+        shutter_state = self.setup.shutter_status
+        if shutter_state:
+            print("Shutter is currently open. Closing it...")
+            self.setup.toggle_shutter()
+        else:
+            print("Shutter is currently closed. Opening it...")
+            self.setup.toggle_shutter()
+        shutter_state = self.setup.shutter_status
+
+        self.label_shutter_status.text = f"Shutter: {'Open' if shutter_state else 'Closed'}"
+        self.print_power_label()
 
 if __name__ == '__main__':
     Sabbath().run()
