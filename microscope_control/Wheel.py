@@ -62,4 +62,12 @@ class Wheel:
                 return False
         return True
 
+    def get_filter(self):
+        if self is False:
+            print('no wheel connected')
+            return
+        pos = [0]
+        fwxc.FWxCGetPosition(self.wheel, pos)
+        self.location = pos[0]
+        return self.location
 
