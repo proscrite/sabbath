@@ -22,7 +22,8 @@ import microscope_control.motor as motor
 from .utils import *
 
 from .pylablib_DCAM.devices.DCAM import DCAMCamera
-import thorlabs_apt as apt
+from pylablib.devices.Thorlabs import KinesisMotor
+# import thorlabs_apt as apt
 # from quick_spectra import analyse_spectrum
 # from get_trajectories import analyse_trajectories
 # from analyse_power_ramps import analyse_ramp
@@ -40,13 +41,15 @@ class Setup:
         self.wheel = Wheel.Wheel()
         self.meter = Meter2.Meter()
         self.settings = pd.DataFrame()
-        self.motor = apt.Motor(26002227)
+        # self.motor = apt.Motor(26002227)
+        self.motor = KinesisMotor("26002227", scale=2184533.33) # scale is in mm/step
         self.arduino = serial.Serial("COM6", 9600, timeout=1) # Open serial port to arduino
         self.fraction_power = 1.0
         self.max_power = self.get_power()
         self.position_max = 0.0
         self.shutter_status = False
-        self.filter_id = 1
+        self.open_all_devices()
+        self.filter_id = self.wheel.get_filter()
         self.texp = 0.5
         self.roi = [0, 2048, 0, 2048]  # Default ROI for the whole image
 
@@ -151,13 +154,14 @@ class Setup:
             #    camera.exposure_time(FILTERS_EXPOSER[i + 1])
                 self.open_shutter()
                 data_set['images'][0][i] = self.cam.snap(timeout=15)
-                powers.append(round(self.meter.read() * 1e6, 4))
+                powers.append(round(self.get_power() * 1e6, 4))
                 self.close_shutter()
             
             save_path = saving.save_tif_set(data_set['images'][0], name, data_set['power'][0])
             mean_power = np.mean(powers)
             
             self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', mean_power)
+            print('In take images, settings: ', self.settings)
 
             SetupSettings.write_settings(save_path, self.settings)
             print_image_set(data_set['images'][0])
@@ -545,7 +549,7 @@ class Setup:
 
     def read_zpos(self):
         """Return z position from motor"""
-        z_pos = round(self.motor.position, 3)
+        z_pos = round(self.motor.get_position(), 3)
         print("Current Z position: ", z_pos)
         return z_pos
     
@@ -565,8 +569,9 @@ class Setup:
 
     def move_zpos(self, new_zpos=None):
         """Move Z position to new value"""
-        self.motor.move_to(new_zpos, blocking=True)
-        print('New Z position: ', round(self.motor.position, 3))
+        self.motor.move_to(new_zpos)
+        self.motor.wait_move()
+        print('New Z position: ', round(self.motor.get_position(), 3))
         self.settings = SetupSettings.add_settings_value(self.settings, 'ZPOS(mm)', new_zpos)
         
     
