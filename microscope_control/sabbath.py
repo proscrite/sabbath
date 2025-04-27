@@ -2,23 +2,44 @@ from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
+from kivy.core.text import LabelBase
+from kivy.core.text import FontContextManager as FCM
+from kivy.clock import Clock
 
 from functools import partial, wraps
 from microscope_control.Constants import FILTERS, SAMPLES
 from .main import Setup  # your actual Setup class
 
+# # 1) Create a shared context:
+# FCM.create('emoji_greek')
+# # 2) Add seguiemj.ttf (color emoji) and a Greek font:
+# FCM.add_font(r'C:\Windows\Fonts\seguiemj.ttf')
+# # e.g. Segoe UI Variable (has Greek) or Gentium if you’ve installed it
+# FCM.add_font(r'C:\Windows\Fonts\seguisym.ttf')  
+
+LabelBase.register(
+    name='EmojiFont',
+    fn_regular=r'C:\Windows\Fonts\seguiemj.ttf'
+)
 ### ========== Popup Helpers ==========
+def _validate_nonempty_text(s):
+    s = s.strip()
+    if not s:
+        raise ValueError("Input cannot be empty")
+    return s
 
 class PopupMixin:
     def _show_input_popup(self, *, title, current_text, hint, validate, on_success, size_hint=(0.5, 0.5)):
         layout = GridLayout(cols=1, padding=10, spacing=10)
-        layout.add_widget(Label(text=current_text))
-        ti = TextInput(hint_text=hint, multiline=False)
+        layout.add_widget(Label(text=current_text, font_name ='EmojiFont', ))
+        ti = TextInput(hint_text=hint, font_name='EmojiFont', multiline=False)
         btn = Button(text="Set")
         popup = Popup(title=title, content=layout, size_hint=size_hint)
 
@@ -51,11 +72,12 @@ class PopupMixin:
         popup.open()
 
     def _show_combo_popup(self, *, title, current_text, hint, validate, choices, on_success, size_hint=(0.8, 0.8)):
-        layout = GridLayout(cols=1, padding=10, spacing=10)
-        layout.add_widget(Label(text=current_text))
-        popup = Popup(title=title, content=layout, size_hint=size_hint)
-
-        grid = GridLayout(cols=3, spacing=5, size_hint_y=None)
+        
+        scroll = ScrollView(size_hint=(1, 1))
+        popup = Popup(title=title, content=scroll, size_hint=size_hint)  
+        
+        grid = GridLayout(cols=2, spacing=5, size_hint_y=None)
+        grid.add_widget(Label(text=current_text))
         for label, val in choices:
             btn = Button(text=label, size_hint_y=None, height=40)
             btn.bind(on_press=lambda *_ ,v=val: (on_success(v), popup.dismiss()))
@@ -69,12 +91,12 @@ class PopupMixin:
                 v = validate(ti.text)
                 on_success(v)
                 popup.dismiss()
-            except:
+            except ValueError as e:
+                print('Exception: ', e)
                 ti.text = "❌ invalid"
         ti.bind(on_text_validate=_do_set)
-        btn.bind(on_press=_do_set)
-        layout.add_widget(ti)
-        layout.add_widget(btn)
+        grid.add_widget(ti)
+        scroll.add_widget(grid)
         popup.open()
 
 ### ========== Decorators ==========
@@ -148,12 +170,17 @@ class MainScreen(Screen, PopupMixin):
     def _init_labels(self):
         zpos = self.setup.read_zpos()
         power = self.setup.get_power()
-        self.label_shutter_status = Label(text=f"Shutter: Closed", font_size=18, size_hint=(1, 0.2))
-        self.label_status_z = Label(text=f"Z Position: {zpos}", font_size=18, size_hint=(1, 0.2))
-        self.label_exposure_status = Label(text="Exposure: 0.5 s", font_size=18, size_hint=(1, 0.2))
-        self.label_filter_status = Label(text="Filter: 1 - NA", font_size=18, size_hint=(1, 0.2))
-        self.label_sample_status = Label(text="Sample: ?")
-        self.label_power = Label(text=f"Power: {power * 1e6:.2f} μW", font_size=18, size_hint=(1, 0.2))
+        filter_id = self.setup.filter_id
+        self.label_shutter_status = Label(text=f"Shutter: Closed 🚫",  
+                                          font_name='EmojiFont', font_size=18, size_hint=(1, 0.2))
+        self.label_status_z = Label(text=f"Z Position: {zpos} 🕹️", font_name='EmojiFont',
+                                    font_size=18, size_hint=(1, 0.2))
+        self.label_exposure_status = Label(text="Exposure: 0.5 s ⏳", font_name='EmojiFont', font_size=18, size_hint=(1, 0.2))
+        self.label_filter_status = Label(text=f"Filter: {filter_id} NA 🚦 - " + FILTERS[self.setup.filter_id].split('_')[0].replace('Center-', ''),
+                                         font_name='EmojiFont', font_size=18, size_hint=(1, 0.2))
+        self.label_sample_status = Label(text=f"Sample: {self.setup.settings.get('SAMPLE_NAME', 'value')} 🧫🦠🧬", 
+                                         font_name='EmojiFont', font_size=18, size_hint=(1, 0.2))
+        self.label_power = Label(text=f"Power: {power * 1e6:.2f} uW 🔋⚡", font_name='EmojiFont', font_size=18, size_hint=(1, 0.2))
         
         self.status_layout.add_widget(self.label_shutter_status)
         self.status_layout.add_widget(self.label_status_z)
@@ -189,7 +216,7 @@ class MainScreen(Screen, PopupMixin):
         validate=float,
         on_success=lambda self, z: (
             self.setup.move_zpos(z),
-            setattr(self.label_status_z, 'text', f"Z Position: {z:.3f}")
+            setattr(self.label_status_z, 'text', f"Z Position: {z:.3f} 🕹️")
         )
     )
     def manage_zpos(self): pass
@@ -201,14 +228,14 @@ class MainScreen(Screen, PopupMixin):
         validate=float,
         on_success=lambda self, t: (
             self.setup.set_exposure(t),
-            setattr(self.label_exposure_status, 'text', f"Exposure: {t:.2f}s")
+            setattr(self.label_exposure_status, 'text', f"Exposure: {t:.2f}s ⏳")
         )
     )
     def manage_exposure(self): pass
 
     @choice_popup(
         title="Choose Filter (1 - 12)",
-        get_current=lambda self: f"Current filter: {self.setup.filter_id}",
+        get_current=lambda self: f"Current filter: {self.setup.filter_id} - " + FILTERS[self.setup.filter_id].split('_')[0].replace('Center-', ''),
         choices=[(str(k) + ' - ' + v.split('_')[0].replace('Center-', ''), k)
                   for k, v in FILTERS.items()],
         on_success=lambda self, fid: (
@@ -220,20 +247,23 @@ class MainScreen(Screen, PopupMixin):
 
     @combo_popup(
         title="Set Sample",
-        get_current=lambda self: f"Current: {self.setup.settings.get('SAMPLE_NAME', 'None')}",
+        get_current=lambda self: f"Current: {self.setup.settings.loc['SAMPLE_NAME', 'value']} ",
         hint="Type new sample...",
         validate=str,
         choices=[(name, name) for name in SAMPLES.values()],
         on_success=lambda self, val: (
+            print(f"Sample set to: {val}"),
+            # self.confirmation_popup(),
             self.setup.settings.__setitem__('SAMPLE_NAME', val),
-            setattr(self.label_sample_status, 'text', f"Sample: {val}")
+            setattr(self.label_sample_status, 'text', f"Sample: {val} 🧫🦠🧬"),
+            # self.setup.take_images(val, 0),  # Take images with the new sample name for all filters
         )
     )
     def manage_spectra(self): pass
    
     def print_power_label(self, *_):
         power = self.setup.get_power()
-        self.label_power.text = f"P: {power * 1e6:.2f} μW"
+        self.label_power.text = f"P: {power * 1e6:.2f} uW 🔋⚡"
         
 
     def show_settings_menu(self, *_):
@@ -246,8 +276,7 @@ class MainScreen(Screen, PopupMixin):
         def choose_objective(instance):
             def set_objective(value):
                 # Update the DataFrame
-                idx = settings_df[settings_df['setting'] == 'MICROSCOPE_OBJECTIVE'].index[0]
-                settings_df.at[idx, 'value'] = value
+                settings_df.at['MICROSCOPE_OBJECTIVE', 'value'] = value
                 print(f"Objective set to: {value}")
                 self.setup.settings = settings_df  # Update the settings in Setup
                 select_popup.dismiss()
@@ -264,9 +293,9 @@ class MainScreen(Screen, PopupMixin):
             select_popup.open()
 
         for index, row in settings_df.iterrows():
-            grid.add_widget(Label(text=str(row['setting']), size_hint_y=None, height=30))
+            grid.add_widget(Label(text=str(index), size_hint_y=None, height=30))
 
-            if row['setting'] == 'MICROSCOPE_OBJECTIVE':
+            if index == 'MICROSCOPE_OBJECTIVE':
                 btn = Button(text=str(row['value']), size_hint_y=None, height=30)
                 btn.bind(on_press=choose_objective)
                 grid.add_widget(btn)
@@ -292,7 +321,7 @@ class MainScreen(Screen, PopupMixin):
             self.setup.toggle_shutter()
         shutter_state = self.setup.shutter_status
 
-        self.label_shutter_status.text = f"Shutter: {'Open' if shutter_state else 'Closed'}"
+        self.label_shutter_status.text = f"Shutter: {'Open 🟢' if shutter_state else 'Closed 🚫'}"
         self.print_power_label()
 
 ### ========== App ==========
@@ -303,5 +332,9 @@ class SabbathApp(App):
         sm.add_widget(MainScreen(name='main'))
         return sm
 
+    def on_stop(self):
+        # Close all devices when the app is closed
+        self.root.get_screen('main').setup.close_all_devices()
+        print("All devices closed.")
 if __name__ == '__main__':
     SabbathApp().run()
