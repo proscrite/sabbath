@@ -1,4 +1,4 @@
-from Constants import *
+from microscope_control.Constants import *
 import pandas as pd 
 from datetime import datetime
 import os
@@ -37,10 +37,19 @@ def namestr(obj, namespace):
 
     return [name for name in namespace if namespace[name] is obj]
 
-def print_settings(dfsettings):
+def print_settings(df_settings: pd.DataFrame):
+    """Print the settings in a readable format"""
+    print('Settings in print_settings:')
     print()
-    print(dfsettings)
+    nindex = range(len(df_settings.index))
+    settings_print = df_settings.copy()
+    settings_print = settings_print.reset_index()
+    settings_print['key'] = nindex
+    # settings_print['setting'] = settings_print.index
+    settings_print = settings_print.set_index('key', drop=True, )
+    print(settings_print)
     print()
+    return settings_print
 
 def write_settings_static(fout):
 
@@ -54,17 +63,17 @@ def write_settings_static(fout):
     with open(fout, 'w') as fo:
         fo.write(';\n'.join(fsettings))
 
-def write_settings(fout, dfsettings):
+def write_settings(fout, df_settings):
     fileout = fout + '\settings.json'
     print('Writing settings in ', fileout)
-    dfsettings.to_csv(fileout, sep=':', header=False, index=False)
+    df_settings.to_csv(fileout, sep=':', header=False, index=True)
 
 def read_settings(fin):
     fin = fin.replace('\\', '/')
-    print(fin)
-    df_settings = pd.read_csv(fin, sep=':', names=['setting', 'value'], )
+    # print(fin)
+    df_settings = pd.read_csv(fin, sep=':', names=['setting', 'value'])
+    df_settings = df_settings.set_index('setting', drop=True)
     return df_settings
-
 
 def edit_dropdown(key, dictionary, df_edit):
     dropdowns = {'laser': DICT_LASER_SOURCE, 'obj': DICT_MICROSCOPE_OBJECTIVE}
@@ -84,16 +93,15 @@ def edit_dropdown(key, dictionary, df_edit):
             flag_stop = False 
         else:
             print("invalid key")
-    
-    
 
 def edit_settings(df_settings):
     # df_edit = df_settings[ df_settings ['setting'] != 'EXPOSURE_TIME']    
-    df_edit = df_settings[~df_settings['setting'].isin(['EXPOSURE_TIME', 'POWER(uW)'])].copy()      # Blocked settings (set automatically)
-    df_block = df_settings[df_settings['setting'].isin(['EXPOSURE_TIME', 'POWER(uW)'])].copy()
+    df_index = print_settings(df_settings)
+
+    df_edit = df_index[~df_index['setting'].isin(['EXPOSURE_TIME', 'POWER(uW)', 'ZPOS(mm)'])].copy()      # Blocked settings (set automatically)
+    df_block = df_index[df_index['setting'].isin(['EXPOSURE_TIME', 'POWER(uW)', 'ZPOS(mm)'])].copy()
     flag_stop = True
     while flag_stop:
-        print(df_settings)
         print("\nPress 'q' to quit\n" )
         key = input('\nSelect key\n')
         if key == 'q':
@@ -109,18 +117,20 @@ def edit_settings(df_settings):
                 print(f'\nEditing {df_edit.setting[key]} = {df_edit.value[key]}')
                 value = input('\nEnter value:\n')
                 df_edit.loc[key, 'value'] = value
+        elif int(key) in df_block.index:
+            print('Blocked settings, cannot be edited in this menu')
+            continue
         else:
-            print("invalid or blocked key")
+            print("invalid key")
+            continue
        
         df_settings = pd.concat([df_edit, df_block])
-    
+        df_settings = df_settings.set_index('setting', drop=True)
+        df_index = print_settings(df_settings)
     return df_settings
 
 def add_settings_value(df_setting, setting, value):
-    df_setting['nindex'] = df_setting.index
-    df_setting = df_setting.set_index('setting', drop=False)
-    df_setting.loc[setting, 'value'] = value
-    df_setting = df_setting.set_index('nindex', drop=True)
+    df_setting.loc[setting] = value
     return df_setting
     
 def find_recent_settings():

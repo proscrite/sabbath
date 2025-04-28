@@ -3,29 +3,33 @@ import time
 import os
 import numpy as np
 import pandas as pd
-from Constants import *
 from matplotlib import pyplot as plt
 from ast import literal_eval
-from pylablib_DCAM.devices.DCAM import DCAMCamera
-import Wheel
-import Meter2    # Meter2 for TLPMX (new API version), Meter for TLMP (older version)
-import saving
-import SetupSettings
-import motor
 import serial
 import sys
+from skimage import io
 import warnings
 warnings.filterwarnings("ignore", message=".*low contrast image.*")
-sys.path.append(r'C:\Users\owner\Documents\thorlabs_apt-master')
+import logging
+logging.getLogger('numba').setLevel(logging.INFO)
+# sys.path.append(r'C:\Users\owner\Documents\thorlabs_apt-master')
 sys.path.append(r'G:\My Drive\Ba Tagging')
 sys.path.append(r'G:\My Drive\Ba Tagging\code\imag_analisis')
+from microscope_control.Constants import *
+import microscope_control.Wheel as Wheel
+import microscope_control.Meter2 as Meter2   # Meter2 for TLPMX (new API version), Meter for TLMP (older version)
+import microscope_control.saving as saving
+from microscope_control import SetupSettings
+import microscope_control.motor as motor
+from .utils import *
 
-import thorlabs_apt as apt
-from utils import *
-from quick_spectra import analyse_spectrum
-from get_trajectories import analyse_trajectories
-from analyse_power_ramps import analyse_ramp
-from dynamic_roi_draw import run_roi_selector
+from .pylablib_DCAM.devices.DCAM import DCAMCamera
+from pylablib.devices.Thorlabs import KinesisMotor
+# import thorlabs_apt as apt
+# from quick_spectra import analyse_spectrum
+# from get_trajectories import analyse_trajectories
+# from analyse_power_ramps import analyse_ramp
+# from dynamic_roi_draw import run_roi_selector
 
 
 data_struct = np.dtype([('date', 'double'), ('power', 'double'), ('name', str), ('images', (np.uint16, (24, 2048, 2048)))])
@@ -39,11 +43,16 @@ class Setup:
         self.wheel = Wheel.Wheel()
         self.meter = Meter2.Meter()
         self.settings = pd.DataFrame()
-        self.motor = apt.Motor(26002227)
+        # self.motor = apt.Motor(26002227)
+        self.motor = KinesisMotor("26002227", scale=2184533.33) # scale is in mm/step
         self.arduino = serial.Serial("COM6", 9600, timeout=1) # Open serial port to arduino
         self.fraction_power = 1.0
         self.max_power = self.get_power()
         self.position_max = 0.0
+        self.shutter_status = False
+        self.open_all_devices()
+        self.filter_id = self.wheel.get_filter()
+        self.texp = 0.5
         self.roi = [0, 2048, 0, 2048]  # Default ROI for the whole image
 
         self.cam.set_exposure(0.5)   # Set default exposure time to 0.5s
@@ -52,21 +61,19 @@ class Setup:
             {
             'i': (self.take_spectra, 'Take Spectra'),
             'f': (self.image_filter, 'Take image of single filter'),
-            'F': (self.move_filter, 'Move filter wheel'),
+            'F': (self.select_filter, 'Move filter wheel'),
             'a': (self.autofocus, 'Autofocus'),
             'h': (0, 'List of commands'),
-            'z': (self.move_zpos, 'Move Z position'),
+            'z': (self.get_zpos, 'Move Z position'),
             'l': (self.live_cam, 'Live camera'),
             's': (self.toggle_shutter, 'Shutter (open/close)'),
-            't': (self.time_evolution, 'Take time evolution'),
-            'e': (self.set_exposure, 'Set camera exposure'),
+            't': (self.take_sequence, 'Take time evolution'),
+            'e': (self.get_exposure, 'Set camera exposure'),
             'p': (self.print_power, 'Get power reading'),
             'n': (self.attenuate_power, 'Set power attenuation'),
             'N': (self.maximum_power, 'Set power to maximum'),
             'r': (self.power_ramp, 'Power ramps'),
             'R': (self.select_ROI, 'Select ROI'),
-            't': (self.time_evolution, 'Take time evolution'),
-            'e': (self.set_exposure, 'Set camera exposure'),
             ',': (self.settings_menu, 'Settings menu'),
             'q': (self.leave, 'quit')
             # 'cam': (self.show_prop_camera, 'Show camera proerties'),
@@ -149,20 +156,23 @@ class Setup:
             #    camera.exposure_time(FILTERS_EXPOSER[i + 1])
                 self.open_shutter()
                 data_set['images'][0][i] = self.cam.snap(timeout=15)
-                powers.append(round(self.meter.read() * 1e6, 4))
+                powers.append(round(self.get_power() * 1e6, 4))
                 self.close_shutter()
             
             save_path = saving.save_tif_set(data_set['images'][0], name, data_set['power'][0])
             mean_power = np.mean(powers)
             
             self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', mean_power)
+            print('In take images, settings: ', self.settings)
 
             SetupSettings.write_settings(save_path, self.settings)
             print_image_set(data_set['images'][0])
             return save_path
 
     def select_ROI(self):
+        self.open_shutter()
         img0 = self.cam.snap(timeout=15)
+        self.close_shutter()
         self.roi = run_roi_selector(img0)
 
     def send_ttl(self, command):
@@ -172,12 +182,15 @@ class Setup:
 
     def toggle_shutter(self):
         self.send_ttl('T')
+        self.shutter_status = not self.shutter_status
 
     def open_shutter(self):
         self.send_ttl('H')
+        self.shutter_status = True
     
     def close_shutter(self):
         self.send_ttl('L') 
+        self.shutter_status = False
 
     def get_power(self):
         if self.meter.open(1):
@@ -185,11 +198,16 @@ class Setup:
         self.meter.close()
         return current_power
 
-    def move_filter(self):
-        filters = 0
-        while filters == 0:
-            filters = get_filters_to_snap()
-        self.wheel.set_filter(filters)
+    def select_filter(self):
+        filter_id = 0
+        while filter_id == 0:
+            filter_id = get_filters_to_snap()
+        self.move_filter(filter_id)
+    
+    def move_filter(self, filter_id):
+        """Move filter wheel to the selected filter"""
+        self.wheel.set_filter(filter_id)
+        self.filter_id = filter_id
 
     def print_power(self):
         if self.meter.open(1):
@@ -377,13 +395,13 @@ class Setup:
 
     def autofocus(self):
         self.open_shutter()
-        motor.main_autofocus(self.cam, self.motor, self.wheel)
+        self.motor.main_autofocus(self.cam, self.motor, self.wheel)
         self.close_shutter()
 
     def take_spectra(self):
         name = get_sample_name()
         filters = 0
-        texp = 7.0
+        texp = 0.50
         self.cam.set_exposure(texp)   # Set exposure to spectra taking value
         self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
     
@@ -471,26 +489,52 @@ class Setup:
 
             # self.close_all_devices()
             
-    # def take_sequence(self):
-    #     if self.open_all_devices() is False:
-    #             return
-    #     print('Devices open, taking sequence')
-    #     data = self.cam.take_sequence()
-    #     print(data)
-       
+    def take_sequence(self):
+        if self.open_all_devices() is False:
+            return
+        name = get_sample_name()
+        filters = get_filters_to_snap()
+        nframes = get_nframes()
+        texp = self.cam.get_exposure()
+        question = 'Sample:\t' + name + '\nFilter:\t' + FILTERS[filters] + '\n'
+        question += 'Exposure:\t' + str(texp) + 's' 
+        question += '\nNumber of frames:\t %i \n' %nframes
+        question += '\nTake image with this parameters? y/n\n'
+        if not get_yes_no(question):
+            return
+        rootpath = IMAGE_TIMERUN_SAVE_LOCATION
+        path = saving.check_path_save(rootpath, name, filters)
+        # mean_intensities = []
+        self.open_shutter()
+        print('Devices open, taking sequence')
+        data = self.cam.grab(nframes)
+        print('Sequence taken, data shape: ', len(data))
+        power = round(self.meter.read() * 1e6, 4)
+        self.close_shutter()
 
-    def set_exposure(self):
-        if self.cam.is_opened() is False:
+        # Save sequence in individual files
+        for n, img in enumerate(data):
+            print("Saving Frame nr. %i" %n)
+            # img = img[self.roi[0]: self.roi[1], self.roi[2]: self.roi[3]]
+            path_file = path + '\\' + FILTERS[filters] + '_' + '_P_' + str(power) + 'uW_frame_' + str(n).zfill(3) +'.tif'
+
+            io.imsave(path_file, img)
+            # saving.single_tif_save(img, path, name, power, filters)
+        SetupSettings.write_settings(path, self.settings)
+
+    def get_exposure(self):
+        current_exposure = self.cam.get_exposure()
+        key = check_expTime(current_exposure)
+        if key == 'q':
             return
-        question = 'Current exposure is %0.2f s \n' %(self.cam.get_exposure())
-        print(question)
-        try:
-            texp = float(get_expTime())
-            self.cam.set_exposure(texp)
-            self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
-        except ValueError or TypeError or NameError:
-            return
-        # self.cam.close()
+        else:
+            self.texp = key
+            self.set_exposure(self.texp)
+
+    def set_exposure(self, texp):
+        self.cam.set_exposure(texp)
+        self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
+        print('Exposure time set to %0.2f s' %texp)
 
     def show_prop_camera(self):
         if self.cam.is_opened() is False:
@@ -511,11 +555,11 @@ class Setup:
 
     def read_zpos(self):
         """Return z position from motor"""
-        z_pos = round(self.motor.position, 3)
+        z_pos = round(self.motor.get_position(), 3)
         print("Current Z position: ", z_pos)
         return z_pos
     
-    def move_zpos(self):
+    def get_zpos(self):
         z_pos = self.read_zpos()
         try:
             new_zpos = input('Current Z position is %0.3f mm, enter to move to new position\n' %z_pos)
@@ -527,9 +571,14 @@ class Setup:
             print('Z position too high, max value is 21.0 mm')
             return
         else:
-            self.motor.move_to(new_zpos, blocking=True)
-            print('New Z position: ', round(self.motor.position, 3))
-            self.settings = SetupSettings.add_settings_value(self.settings, 'ZPOS(mm)', new_zpos)
+            self.move_zpos(new_zpos)
+
+    def move_zpos(self, new_zpos=None):
+        """Move Z position to new value"""
+        self.motor.move_to(new_zpos)
+        self.motor.wait_move()
+        print('New Z position: ', round(self.motor.get_position(), 3))
+        self.settings = SetupSettings.add_settings_value(self.settings, 'ZPOS(mm)', new_zpos)
         
     
     def init_settings(self):
@@ -544,6 +593,7 @@ class Setup:
         texp = self.cam.get_exposure()
         self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
 
+        print('Last sample name: ', self.settings.loc['SAMPLE_NAME', 'value'])
 
     def settings_menu(self):
         self.settings = SetupSettings.edit_settings(self.settings)
@@ -551,7 +601,7 @@ class Setup:
 
 def main():
     st = Setup()
-    st.open_all_devices()
+    # st.open_all_devices()
     st.open_cam()
     st.init_settings()
     # st.camera.open()

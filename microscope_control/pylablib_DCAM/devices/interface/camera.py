@@ -677,6 +677,7 @@ class ICamera(interface.IDevice):
             return (frames,info) if return_info else frames
         finally:
             self.stop_acquisition()
+            
     def snap(self, timeout=15., return_info=False):
         """Snap a single frame"""
         res=self.grab(frame_timeout=timeout,return_info=return_info)

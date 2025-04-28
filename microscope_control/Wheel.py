@@ -1,5 +1,5 @@
-import FWxC_COMMAND_LIB as fwxc
-from Constants import *
+from microscope_control import FWxC_COMMAND_LIB as fwxc
+from microscope_control.Constants import *
 import time
 
 
@@ -49,12 +49,13 @@ class Wheel:
             sleep_time = location - self.location
         else:
             sleep_time = 12 - self.location + location
-        time.sleep(sleep_time*0.8)      # arbitrary number that seems to work
+        # time.sleep(sleep_time*0.8)      # arbitrary number that seems to work
+        time.sleep(1)
         pos = [0]
         fwxc.FWxCGetPosition(self.wheel, pos)
         self.location = pos[0]
         if self.location != location:
-            time.sleep(2)       # arbitrary extra time
+            time.sleep(1)       # arbitrary extra time
             fwxc.FWxCGetPosition(self.wheel, pos)
             self.location = pos[0]
             if self.location != location:
@@ -62,4 +63,12 @@ class Wheel:
                 return False
         return True
 
+    def get_filter(self):
+        if self is False:
+            print('no wheel connected')
+            return
+        pos = [0]
+        fwxc.FWxCGetPosition(self.wheel, pos)
+        self.location = pos[0]
+        return self.location
 

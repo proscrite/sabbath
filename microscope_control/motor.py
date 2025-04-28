@@ -1,26 +1,26 @@
 import sys
 sys.path.append(r'C:\Users\owner\Documents\thorlabs_apt-master')
 
-import cv2
+# import cv2
 import time
 from PIL import Image
 from skimage import exposure, filters
 
-import os
-import matplotlib
+# import os
+# import matplotlib
 import numpy as np
 import time
-from Constants import *
+from microscope_control.Constants import *
 from matplotlib import pyplot as plt
 from scipy.stats import kurtosis
 
 from ast import literal_eval
-import Camera
-from pylablib_DCAM.devices.DCAM import DCAMCamera
-import Wheel
-import Meter
-import saving
-#matplotlib.interactive(True)
+# from pylablib_DCAM.devices.DCAM import DCAMCamera
+# import Camera
+# import Wheel
+# import Meter
+# import saving
+# #matplotlib.interactive(True)
 sys.path.append(r'G:\My Drive\Ba Tagging\code\imag_analisis')
 
 from image_processing import find_fov
