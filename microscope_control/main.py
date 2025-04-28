@@ -10,7 +10,9 @@ import sys
 from skimage import io
 import warnings
 warnings.filterwarnings("ignore", message=".*low contrast image.*")
-sys.path.append(r'C:\Users\owner\Documents\thorlabs_apt-master')
+import logging
+logging.getLogger('numba').setLevel(logging.INFO)
+# sys.path.append(r'C:\Users\owner\Documents\thorlabs_apt-master')
 sys.path.append(r'G:\My Drive\Ba Tagging')
 sys.path.append(r'G:\My Drive\Ba Tagging\code\imag_analisis')
 from microscope_control.Constants import *
@@ -399,7 +401,7 @@ class Setup:
     def take_spectra(self):
         name = get_sample_name()
         filters = 0
-        texp = 7.0
+        texp = 0.50
         self.cam.set_exposure(texp)   # Set exposure to spectra taking value
         self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
     
@@ -522,13 +524,17 @@ class Setup:
 
     def get_exposure(self):
         current_exposure = self.cam.get_exposure()
-        self.texp = check_expTime(current_exposure)
-        self.set_exposure(texp)
+        key = check_expTime(current_exposure)
+        if key == 'q':
+            return
+        else:
+            self.texp = key
+            self.set_exposure(self.texp)
 
     def set_exposure(self, texp):
         self.cam.set_exposure(texp)
         self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
-        # self.cam.close()
+        print('Exposure time set to %0.2f s' %texp)
 
     def show_prop_camera(self):
         if self.cam.is_opened() is False:
@@ -587,6 +593,7 @@ class Setup:
         texp = self.cam.get_exposure()
         self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
 
+        print('Last sample name: ', self.settings.loc['SAMPLE_NAME', 'value'])
 
     def settings_menu(self):
         self.settings = SetupSettings.edit_settings(self.settings)
@@ -594,7 +601,7 @@ class Setup:
 
 def main():
     st = Setup()
-    st.open_all_devices()
+    # st.open_all_devices()
     st.open_cam()
     st.init_settings()
     # st.camera.open()

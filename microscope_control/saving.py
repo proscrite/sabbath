@@ -69,8 +69,12 @@ def check_path_save(rootpath, name, filters=None):
    ####### Check number of existing measurements in directory
     try: 
         last_set = int(nsets[-1])
+        print('Number of sets: ', len(nsets))
+        print('Nsets: ', nsets)
+        print('Last set number: ', nsets[-1])
+        print('Last set: ', last_set)
+        print('Path: ', path)
     except IndexError: last_set = 0
-
    ####### Set current measurement as last_set + 1 (previously 'num')
     path += '\\' + str(last_set+1).zfill(2)
 

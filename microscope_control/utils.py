@@ -29,13 +29,14 @@ def check_expTime(current_exposure=None):
                 return 0.5
             elif (key.isnumeric()):
                 'Returning to main'
-                return key
+                return float(key)
             elif type(literal_eval(key)) == float:
-                return key
+                return float(key)
             else:
                 print('invalid key')
-    except ValueError or TypeError or NameError:
-        return
+                return 'q'
+    except ValueError or TypeError or NameError as e:
+        return 'q'
 
 def get_sample_name():
     while True:
