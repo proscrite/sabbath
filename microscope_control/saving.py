@@ -68,7 +68,7 @@ def check_path_save(rootpath, name, filters=None):
 
    ####### Check number of existing measurements in directory
     try: 
-        last_set = int(nsets[-1][0])
+        last_set = int(nsets[-1])
     except IndexError: last_set = 0
 
    ####### Set current measurement as last_set + 1 (previously 'num')
@@ -105,7 +105,7 @@ def save_tif_set(data, name, power):
     path = check_path_save(rootpath, name)
 
     t = time.strftime('_%H-%M-%S')
-    for filters in range(NUMBER_OF_FILTERS):
+    for filters in range(len(data)):
         path_file = path + '\\' + str(FILTERS[filters+1]) + t + '.tif'
         print('Filter save: ', filters)
         print(path_file)

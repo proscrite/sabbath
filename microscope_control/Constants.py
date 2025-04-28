@@ -87,6 +87,8 @@ IMAGE_SINGLE_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\sing\\"
 IMAGE_TIMERUN_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\time\\"
 IMAGE_POWER_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\ramp\\"
 
+ROOT_DIR = r'G:\My Drive\Ba Tagging'
+FILTER_PATH = ROOT_DIR +r'\code\imag_analisis\filter_stats.csv'
 NP_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\numpy\\"
 EXIFTOOL_APP = "G:\\My Drive\\Ba Tagging\\code\\microscope_control\\exiftool.exe"
 EXIFTOOL_OK_STRING = "1 image files updated"

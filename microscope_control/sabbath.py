@@ -13,8 +13,26 @@ from kivy.core.text import LabelBase
 from kivy.core.text import FontContextManager as FCM
 from kivy.clock import Clock
 
+import threading
+import time
+import matplotlib.pyplot as plt
+from matplotlib import rcParams
+rcParams.update({'errorbar.capsize': 4})
+import pandas as pd
+from kivy_garden.matplotlib.backend_kivyagg import FigureCanvasKivyAgg
+
+
+import logging
+# raise font_manager (and all matplotlib) to WARNING+
+logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+logging.getLogger('matplotlib').setLevel(logging.WARNING)
+from kivy.logger import Logger
+Logger.setLevel(logging.INFO)
 from functools import partial, wraps
-from microscope_control.Constants import FILTERS, SAMPLES
+
+from microscope_control.saving import save_tif_set
+from microscope_control.SetupSettings import write_settings
+from microscope_control.Constants import FILTERS, SAMPLES, FILTER_PATH
 from .main import Setup  # your actual Setup class
 
 # # 1) Create a shared context:
@@ -79,13 +97,11 @@ class PopupMixin:
         grid = GridLayout(cols=2, spacing=5, size_hint_y=None)
         grid.add_widget(Label(text=current_text))
         for label, val in choices:
-            btn = Button(text=label, size_hint_y=None, height=40)
+            btn = Button(text=val, size_hint_y=None, height=40)
             btn.bind(on_press=lambda *_ ,v=val: (on_success(v), popup.dismiss()))
             grid.add_widget(btn)
-        layout.add_widget(grid)
 
-        ti = TextInput(hint_text=hint, multiline=False)
-        btn = Button(text="Set")
+        ti = TextInput(hint_text=hint, multiline=False, font_name = 'EmojiFont', size_hint_y=None, height=40)  
         def _do_set(*_):
             try:
                 v = validate(ti.text)
@@ -132,13 +148,16 @@ def combo_popup(title, get_current, hint, validate, choices, on_success):
     def deco(fn):
         @wraps(fn)
         def wrapped(self, *args, **kwargs):
+            def _on_choice(v):
+                on_success(self, v)
+                fn(self, v, *args, **kwargs)
             self._show_combo_popup(
                 title=title,
                 current_text=get_current(self),
                 hint=hint,
                 validate=validate,
                 choices=choices,
-                on_success=lambda v: on_success(self, v)
+                on_success=_on_choice
             )
         return wrapped
     return deco
@@ -195,7 +214,7 @@ class MainScreen(Screen, PopupMixin):
         self._add_button('Time Trajectories', self.setup.time_evolution)
         self._add_button('Take Image', self.setup.take_images)
         self._add_button('Power ramp', self.setup.power_ramp)
-        self._add_button('Live Camera', self.setup.live_cam)
+        self._add_button('Live Camera', self.manage_live_cam)
         self._add_button('Set ROI', self.setup.select_ROI)
         self._add_button('Set Filter', self.choose_filter)
         self._add_button('Set Exposure', self.manage_exposure)
@@ -209,10 +228,20 @@ class MainScreen(Screen, PopupMixin):
         btn.bind(on_press=lambda *_: func())
         self.button_layout.add_widget(btn)
 
+    def manage_take_image(self, *_):
+        # Check if the camera is open before taking an image
+        if self.setup.cam.is_open:
+            
+            img = self.setup.cam.snap(timeout=15)
+
+        else:
+            print("Camera is not open. Please open the camera first.")
+            self.setup.cam.open()
+
     @text_popup(
         title="Set Z Position",
         hint="Z in mm",
-        get_current=lambda self: f"Current Z: {self.setup.read_zpos():.3f}",
+        get_current=lambda self: f"Current Z: {self.setup.read_zpos():.3f} 🕹️",
         validate=float,
         on_success=lambda self, z: (
             self.setup.move_zpos(z),
@@ -240,7 +269,8 @@ class MainScreen(Screen, PopupMixin):
                   for k, v in FILTERS.items()],
         on_success=lambda self, fid: (
             self.setup.move_filter(fid),
-            setattr(self.label_filter_status, 'text', f"Filter: {fid} - " + FILTERS[fid].split('_')[0].replace('Center-', ''))
+            setattr(self.label_filter_status,
+                     'text', f"Filter: {fid} - " + FILTERS[fid].split('_')[0].replace('Center-', '') + " 🚦" if fid != 0 else "Filter: None 🚦"),
         )
     )
     def choose_filter(self): pass
@@ -249,18 +279,43 @@ class MainScreen(Screen, PopupMixin):
         title="Set Sample",
         get_current=lambda self: f"Current: {self.setup.settings.loc['SAMPLE_NAME', 'value']} ",
         hint="Type new sample...",
-        validate=str,
-        choices=[(name, name) for name in SAMPLES.values()],
+        validate=_validate_nonempty_text,
+        choices=[(key, name) for key, name in SAMPLES.items() if name != 'quit' and name != 'other'],
         on_success=lambda self, val: (
             print(f"Sample set to: {val}"),
-            # self.confirmation_popup(),
-            self.setup.settings.__setitem__('SAMPLE_NAME', val),
             setattr(self.label_sample_status, 'text', f"Sample: {val} 🧫🦠🧬"),
-            # self.setup.take_images(val, 0),  # Take images with the new sample name for all filters
         )
     )
-    def manage_spectra(self): pass
+    def manage_spectra(self, val, *_):
+        # grab the current sample name
+        print('Entering manage_spectra after decorator')
+        self.setup.settings.at['SAMPLE_NAME', 'value'] = val
+        name = self.setup.settings.loc['SAMPLE_NAME', 'value']
+        # if there’s already a SpectrumScreen, remove it:
+        if self.manager.has_screen('spectrum'):
+            self.manager.remove_widget(self.manager.get_screen('spectrum'))
+
+        # create & add the new screen
+        spec = SpectrumScreen(
+            name= 'spectrum',
+            setup= self.setup,
+            sample_name= name
+        )
+        self.manager.add_widget(spec)
+        self.manager.current = 'spectrum'
    
+    @choice_popup(
+        title="Confirmation",
+        get_current=lambda self: f"Current: {self.setup.settings.get('SAMPLE_NAME', 'value')} ",
+        choices=[("Yes", True), ("No", False)],
+        on_success=lambda self, val: (
+            setattr(self.setup.settings.loc['SAMPLE_NAME', 'value'], val),
+            setattr(self.label_sample_status, 'text', f"Sample: {val} 🧫🦠🧬"
+                     if val else setattr(self.label_sample_status, 'text', f"Sample: None', ")),
+        )
+    )
+    def confirmation_popup(self): pass
+
     def print_power_label(self, *_):
         power = self.setup.get_power()
         self.label_power.text = f"P: {power * 1e6:.2f} uW 🔋⚡"
@@ -323,6 +378,96 @@ class MainScreen(Screen, PopupMixin):
 
         self.label_shutter_status.text = f"Shutter: {'Open 🟢' if shutter_state else 'Closed 🚫'}"
         self.print_power_label()
+
+    def manage_live_cam(self, *_):
+        threading.Thread(target=self.setup.live_cam, daemon=True).start()
+
+### ========== Spectrum Screen ==========
+
+class SpectrumScreen(Screen):
+    def __init__(self, setup, sample_name, **kwargs):
+        super().__init__(**kwargs)
+        self.setup       = setup
+        self.sample_name = sample_name
+        self.filt_stats = pd.read_csv(FILTER_PATH)
+        self.filt_center = self.filt_stats['central_lambda'].astype(float)[:10]
+        self.filt_center = self.filt_center[::-1]
+        self.filt_range = self.filt_stats['range_width'].astype(float)[:10] / 2
+        self.filt_range = self.filt_range[::-1]
+
+        # 1) Build your UI on the main thread:
+        root = BoxLayout(orientation='vertical')
+        self.fig, self.ax = plt.subplots()
+        self.mpl_canvas = FigureCanvasKivyAgg(self.fig)
+        root.add_widget(self.mpl_canvas)
+
+        # Continue button, initially disabled:
+        self.continue_btn = Button(
+            text="Continue ✔️", font_name='EmojiFont',
+            size_hint=(1, None), 
+            height=50, 
+            disabled=True
+        )
+        # When pressed, switch back to main screen:
+        self.continue_btn.bind(on_press=lambda *_: setattr(self.manager, 'current', 'main'))
+        root.add_widget(self.continue_btn)
+
+        self.add_widget(root)
+
+        # storage for the dynamic data
+        self.processed_filters = []
+        self.processed_sums    = []
+
+        # 2) Launch the hardware loop in a background thread
+        threading.Thread(target=self._acquire_loop, daemon=True).start()
+
+    def _acquire_loop(self):
+        # Loop over filters 1→12
+        images = []
+        powers = []
+        self.setup.cam.set_exposure(0.5)
+        for fid in range(12, 0, -1):
+            # set filter, snap image
+            self.setup.wheel.set_filter(fid)
+            self.setup.open_shutter()
+            power_i = self.setup.get_power() * 1e6  # in uW
+            powers.append(power_i)
+            img = self.setup.cam.snap(timeout=15)
+            self.setup.close_shutter()
+
+            images.append(img)
+            # compute sum of pixels
+            total = img.sum()
+
+            # schedule a UI update
+            Clock.schedule_once(lambda dt, f=fid, s=total: self._update_plot(f, s))
+
+        avg_power = sum(powers) / len(powers)
+        save_path = save_tif_set(images, self.sample_name, power=avg_power)
+
+        self.setup.settings.loc['POWER(uW)', 'value'] = round(avg_power, 2)
+        write_settings(save_path, self.setup.settings)
+        print(f"Images saved to: {save_path}")
+        Clock.schedule_once(lambda dt: setattr(self.continue_btn, 'disabled', False))
+
+    def _update_plot(self, filter_id, sum_val):
+        # collect
+        self.processed_filters.append(filter_id)
+        self.processed_sums.append(sum_val)
+        x = self.filt_center[:len(self.processed_filters)]
+        y = self.processed_sums[:len(self.processed_filters)]
+        xerr = self.filt_range[:len(self.processed_filters)]
+        # redraw
+        if len(self.processed_filters) < 11:
+            
+            self.ax.clear()
+            self.ax.errorbar(x = x, y = y, xerr=xerr,
+                        marker='o')
+            self.ax.set_xlabel('Wavelength (nm)')
+            self.ax.set_ylabel('Sum of pixels')
+            self.ax.set_title(f"Spectrum for {self.sample_name}")
+            self.mpl_canvas.draw()
+
 
 ### ========== App ==========
 

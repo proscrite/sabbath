@@ -49,12 +49,13 @@ class Wheel:
             sleep_time = location - self.location
         else:
             sleep_time = 12 - self.location + location
-        time.sleep(sleep_time*0.8)      # arbitrary number that seems to work
+        # time.sleep(sleep_time*0.8)      # arbitrary number that seems to work
+        time.sleep(1)
         pos = [0]
         fwxc.FWxCGetPosition(self.wheel, pos)
         self.location = pos[0]
         if self.location != location:
-            time.sleep(2)       # arbitrary extra time
+            time.sleep(1)       # arbitrary extra time
             fwxc.FWxCGetPosition(self.wheel, pos)
             self.location = pos[0]
             if self.location != location:
