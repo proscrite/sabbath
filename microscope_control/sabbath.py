@@ -75,12 +75,12 @@ class PopupMixin:
         layout.add_widget(btn)
         popup.open()
 
-    def _show_choice_popup(self, *, title, current_text, choices, on_success, size_hint=(0.6, 0.6)):
+    def _show_choice_popup(self, *, title, current_text, choices, on_success, size_hint=(0.6, 0.9)):
         layout = GridLayout(cols=2, spacing=10, padding=10)
         layout.add_widget(Label(text=current_text, size_hint_y=None, height=40))
         layout.add_widget(Widget(size_hint_y=None, height=0))
 
-        popup = Popup(title=title, content=layout, size_hint=size_hint)
+        popup = Popup(title=title, content=layout, size_hint=(0.6, 1.0))
 
         for label, val in choices:
             btn = Button(text=label, size_hint_y=None, height=40)
@@ -190,41 +190,40 @@ class MainScreen(Screen, PopupMixin):
         zpos = self.setup.read_zpos()
         power = self.setup.get_power()
         filter_id = self.setup.filter_id
-        self.label_shutter_status = Label(text=f"Shutter: Closed 🚫",  
-                                          font_name='EmojiFont', font_size=18, size_hint=(1, 0.2))
-        self.label_status_z = Label(text=f"Z Position: {zpos} 🕹️", font_name='EmojiFont',
-                                    font_size=18, size_hint=(1, 0.2))
-        self.label_exposure_status = Label(text="Exposure: 0.5 s ⏳", font_name='EmojiFont', font_size=18, size_hint=(1, 0.2))
-        self.label_filter_status = Label(text=f"Filter: {filter_id} NA 🚦 - " + FILTERS[self.setup.filter_id].split('_')[0].replace('Center-', ''),
-                                         font_name='EmojiFont', font_size=18, size_hint=(1, 0.2))
-        self.label_sample_status = Label(text=f"Sample: {self.setup.settings.get('SAMPLE_NAME', 'value')} 🧫🦠🧬", 
-                                         font_name='EmojiFont', font_size=18, size_hint=(1, 0.2))
-        self.label_power = Label(text=f"Power: {power * 1e6:.2f} uW 🔋⚡", font_name='EmojiFont', font_size=18, size_hint=(1, 0.2))
+        self.label_shutter_status = self._add_label(text=f"Shutter: Closed 🚫")
+        self.label_status_z = self._add_label(text=f"Z Position: {zpos} 🕹️")
+        self.label_exposure_status = self._add_label(text="Exposure: 0.5 s ⏳")
+        self.label_filter_status = self._add_label(text=f"Filter: {filter_id} NA 🚦 - " + FILTERS[self.setup.filter_id].split('_')[0].replace('Center-', ''))
+        self.label_sample_status = self._add_label(text=f"Sample: {self.setup.settings.get('SAMPLE_NAME', 'value')} 🧫🦠🧬")
+        self.label_power = self._add_label(text=f"Power: {power * 1e6:.2f} uW 🔋⚡")
         
-        self.status_layout.add_widget(self.label_shutter_status)
-        self.status_layout.add_widget(self.label_status_z)
-        self.status_layout.add_widget(self.label_exposure_status)
-        self.status_layout.add_widget(self.label_filter_status)
-        self.status_layout.add_widget(self.label_sample_status)
-        self.status_layout.add_widget(self.label_power)
         self.status_layout.add_widget(Label(text=""))  # Empty space for layout balance
 
     def _init_buttons(self):
-        self._add_button('Take Spectra', self.manage_spectra)
-        self._add_button('Time Trajectories', self.setup.time_evolution)
-        self._add_button('Take Image', self.setup.take_images)
-        self._add_button('Power ramp', self.setup.power_ramp)
-        self._add_button('Live Camera', self.manage_live_cam)
-        self._add_button('Set ROI', self.setup.select_ROI)
-        self._add_button('Set Filter', self.choose_filter)
-        self._add_button('Set Exposure', self.manage_exposure)
-        self._add_button('Move Z Position', self.manage_zpos)
-        self._add_button('Refresh Power reading', self.print_power_label)
-        self._add_button('Toggle Shutter', self.manage_toggle_shutter)
-        self._add_button('Settings', self.show_settings_menu)
+        self._add_button('Take Spectra 🎨📊', self.manage_spectra)
+        self._add_button('Time Trajectories ⏱️📉', self.setup.time_evolution)
+        self._add_button('Take Image 📸', self.manage_take_image)
+        self._add_button('Power ramp 🔌', self.setup.power_ramp)
+        self._add_button('Live Camera 🎥', self.manage_live_cam)
+        self._add_button('Set Sample name 🧫', self.set_sample_name)
+        self._add_button('Set ROI 🎯', self.setup.select_ROI)
+        self._add_button('Set Filter 🚥', self.choose_filter)
+        self._add_button('Set Exposure 💥', self.manage_exposure)
+        self._add_button('Move Z Position 🎮 ', self.manage_zpos)
+        self._add_button('Refresh Power reading 📟🔋', self.print_power_label)
+        self._add_button('Manage Power 🎚️🔋', self.manage_power)
+        self._add_button('Toggle Shutter 🎬', self.manage_toggle_shutter)
+        self._add_button('Settings ⚙️', self.show_settings_menu)
+
+
+    def _add_label(self, text):
+        lb = Label(text=text, font_name = 'EmojiFont', font_size=18, size_hint=(1, 0.2))
+        self.status_layout.add_widget(lb)
+        return lb
+
 
     def _add_button(self, text, func):
-        btn = Button(text=text, size_hint=(None, None), size=(200, 50))
+        btn = Button(text=text, font_name = 'EmojiFont', size_hint=(None, None), size=(200, 50))
         btn.bind(on_press=lambda *_: func())
         self.button_layout.add_widget(btn)
 
@@ -320,6 +319,8 @@ class MainScreen(Screen, PopupMixin):
         power = self.setup.get_power()
         self.label_power.text = f"P: {power * 1e6:.2f} uW 🔋⚡"
         
+    def manage_power(self, *_):
+        pass
 
     def show_settings_menu(self, *_):
         settings_df = self.setup.settings
@@ -425,7 +426,6 @@ class SpectrumScreen(Screen):
         # Loop over filters 1→12
         images = []
         powers = []
-        self.setup.cam.set_exposure(0.5)
         for fid in range(12, 0, -1):
             # set filter, snap image
             self.setup.wheel.set_filter(fid)
