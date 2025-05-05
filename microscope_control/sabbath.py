@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 rcParams.update({'errorbar.capsize': 4})
 import pandas as pd
+from skimage import io
+
 from kivy_garden.matplotlib.backend_kivyagg import FigureCanvasKivyAgg
 
 
@@ -30,9 +32,9 @@ from kivy.logger import Logger
 Logger.setLevel(logging.INFO)
 from functools import partial, wraps
 
-from microscope_control.saving import save_tif_set
+from microscope_control.saving import *
 from microscope_control.SetupSettings import write_settings
-from microscope_control.Constants import FILTERS, SAMPLES, FILTER_PATH
+from microscope_control.Constants import *
 from .main import Setup  # your actual Setup class
 
 # # 1) Create a shared context:
@@ -80,7 +82,7 @@ class PopupMixin:
         layout.add_widget(Label(text=current_text, size_hint_y=None, height=40))
         layout.add_widget(Widget(size_hint_y=None, height=0))
 
-        popup = Popup(title=title, content=layout, size_hint=(0.6, 1.0))
+        popup = Popup(title=title, content=layout, size_hint=(0.6, 0.85))
 
         for label, val in choices:
             btn = Button(text=label, size_hint_y=None, height=40)
@@ -139,7 +141,7 @@ def choice_popup(title, get_current, choices, on_success):
                 title=title,
                 current_text=get_current(self),
                 choices=choices,
-                on_success=lambda v: on_success(self, v)
+                on_success=_on_choice
             )
         return wrapped
     return deco
@@ -201,7 +203,7 @@ class MainScreen(Screen, PopupMixin):
 
     def _init_buttons(self):
         self._add_button('Take Spectra 🎨📊', self.manage_spectra)
-        self._add_button('Time Trajectories ⏱️📉', self.setup.time_evolution)
+        self._add_button('Time Trajectories ⏱️📉', self.manage_time_evolution)
         self._add_button('Take Image 📸', self.manage_take_image)
         self._add_button('Power ramp 🔌', self.setup.power_ramp)
         self._add_button('Live Camera 🎥', self.manage_live_cam)
@@ -320,7 +322,49 @@ class MainScreen(Screen, PopupMixin):
         )
         self.manager.add_widget(spec)
         self.manager.current = 'spectrum'
-   
+    
+    @choice_popup(
+        title="Choose Filter (1 - 12)",
+        get_current=lambda self: f"Current filter: {self.setup.filter_id} - " + FILTERS[self.setup.filter_id].split('_')[0].replace('Center-', ''),
+        choices=[(str(k) + ' - ' + v.split('_')[0].replace('Center-', ''), k)
+                  for k, v in FILTERS.items()],
+        on_success=lambda self, fid: (
+            self.setup.move_filter(fid),
+            setattr(self.label_filter_status,
+                     'text', f"Filter: {fid} - " + FILTERS[fid].split('_')[0].replace('Center-', '') + " 🚦" if fid != 0 else "Filter: None 🚦"),
+        )
+    )   
+    @combo_popup(
+        title="Set Sample",
+        get_current=lambda self: f"Current: {self.setup.settings.loc['SAMPLE_NAME', 'value']} ",
+        hint="Type new sample...",
+        validate=_validate_nonempty_text,
+        choices=[(key, name) for key, name in SAMPLES.items() if name != 'quit' and name != 'other'],
+        on_success=lambda self, val: (
+            print(f"Sample set to: {val}"),
+            setattr(self.label_sample_status, 'text', f"Sample: {val} 🧫🦠🧬"),
+        )
+    )
+    def manage_time_evolution(self, val, *_):
+        # grab the current sample name
+        print('Entering manage_time_evolution after decorator')
+        self.setup.settings.at['SAMPLE_NAME', 'value'] = val
+        name = self.setup.settings.loc['SAMPLE_NAME', 'value']
+        # if there’s already a TrajectoryScreen, remove it:
+        if self.manager.has_screen('trajectories'):
+            self.manager.remove_widget(self.manager.get_screen('trajectories'))
+
+        # create & add the new screen
+        spec = TrajectoryScreen(
+            name= 'trajectories',
+            setup= self.setup,
+            sample_name= name,
+            filter_id= self.setup.filter_id,
+            n_frames = 10,
+        )
+        self.manager.add_widget(spec)
+        self.manager.current = 'trajectories'
+    
     @choice_popup(
         title="Confirmation",
         get_current=lambda self: f"Current: {self.setup.settings.get('SAMPLE_NAME', 'value')} ",
