@@ -228,14 +228,18 @@ class MainScreen(Screen, PopupMixin):
         self.button_layout.add_widget(btn)
 
     def manage_take_image(self, *_):
-        # Check if the camera is open before taking an image
-        if self.setup.cam.is_open:
-            
-            img = self.setup.cam.snap(timeout=15)
+        name = self.setup.settings.loc['SAMPLE_NAME', 'value']
+        if self.manager.has_screen('single_image'):
+            self.manager.remove_widget(self.manager.get_screen('single_image'))
 
-        else:
-            print("Camera is not open. Please open the camera first.")
-            self.setup.cam.open()
+        # create & add the new screen
+        spec = ImageScreen(
+            name= 'single_image',
+            setup= self.setup,
+            sample_name= name
+        )
+        self.manager.add_widget(spec)
+        self.manager.current = 'single_image'
 
     @text_popup(
         title="Set Z Position",
@@ -274,6 +278,20 @@ class MainScreen(Screen, PopupMixin):
     )
     def choose_filter(self): pass
 
+    @combo_popup(
+        title="Set Sample",
+        get_current=lambda self: f"Current: {self.setup.settings.loc['SAMPLE_NAME', 'value']} ",
+        hint="Type new sample...",
+        validate=_validate_nonempty_text,
+        choices=[(key, name) for key, name in SAMPLES.items() if name != 'quit' and name != 'other'],
+        on_success=lambda self, val: (
+            print(f"Sample set to: {val}"),
+            setattr(self.label_sample_status, 'text', f"Sample: {val} 🧫🦠🧬"),
+        )
+    )
+    def set_sample_name(self, *_):
+        pass
+    
     @combo_popup(
         title="Set Sample",
         get_current=lambda self: f"Current: {self.setup.settings.loc['SAMPLE_NAME', 'value']} ",
@@ -468,6 +486,72 @@ class SpectrumScreen(Screen):
             self.ax.set_title(f"Spectrum for {self.sample_name}")
             self.mpl_canvas.draw()
 
+
+### ========== Single image Screen ==========
+
+class ImageScreen(Screen):
+    def __init__(self, setup, sample_name, **kwargs):
+        super().__init__(**kwargs)
+        self.setup       = setup
+        self.sample_name = sample_name
+
+        # 1) Build your UI on the main thread:
+        root = BoxLayout(orientation='vertical')
+        self.fig, self.ax = plt.subplots()
+        self.mpl_canvas = FigureCanvasKivyAgg(self.fig)
+        root.add_widget(self.mpl_canvas)
+
+        # Continue button, initially disabled:
+        self.continue_btn = Button(
+            text="Continue ✔️", font_name='EmojiFont',
+            size_hint=(1, None), 
+            height=50, 
+            disabled=False
+        )
+        # When pressed, switch back to main screen:
+        self.continue_btn.bind(on_press=lambda *_: setattr(self.manager, 'current', 'main'))
+        root.add_widget(self.continue_btn)
+
+        self.save_btn = Button(
+            text="Save Image 💾", font_name='EmojiFont',
+            size_hint=(1, None), 
+            height=50, 
+            disabled=False
+        )
+        # When pressed, save image:
+        self.save_btn.bind(on_press=lambda *_: self.save_image(img))
+        root.add_widget(self.save_btn)
+        self.add_widget(root)
+
+        # Check if the camera is open before taking an image
+        if self.setup.cam.is_opened():
+            self.setup.open_shutter()
+            img = self.setup.cam.snap(timeout=15)
+            self.setup.close_shutter()
+        else:
+            print("Camera is not open. Please open the camera first.")
+            self.setup.cam.open()
+
+        self.display_image(img)
+
+    def display_image(self, img):
+        # Display the image using matplotlib
+        axob = self.ax.imshow(img)
+        plt.colorbar(axob, ax=self.ax)
+        self.ax.set_title(f"Image for {self.sample_name}")
+        self.mpl_canvas.draw()
+        
+    
+    def save_image(self, img):
+        # Save the image using the save_tif_set function
+        power = self.setup.get_power()
+        rootpath = IMAGE_SINGLE_SAVE_LOCATION
+        save_path = check_path_save(rootpath, self.sample_name, filters=None)
+        self.setup.settings.loc['POWER(uW)', 'value'] = round(power, 2)
+        write_settings(save_path, self.setup.settings)
+        
+        single_tif_save(img, save_path, self.sample_name, power, self.setup.filter_id)
+        print(f"Image saved to: {save_path}")
 
 ### ========== App ==========
 
