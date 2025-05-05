@@ -8,6 +8,8 @@ from kivy.uix.widget import Widget
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
+from kivy.uix.progressbar import ProgressBar
+from kivy.metrics import dp
 from kivy.uix.popup import Popup
 from kivy.core.text import LabelBase
 from kivy.core.text import FontContextManager as FCM
@@ -97,7 +99,8 @@ class PopupMixin:
         popup = Popup(title=title, content=scroll, size_hint=size_hint)  
         
         grid = GridLayout(cols=2, spacing=5, size_hint_y=None)
-        grid.add_widget(Label(text=current_text))
+        grid.add_widget(Label(text=current_text, size_hint_y=None, height=40))
+        grid.add_widget(Widget(size_hint_y=None, height=40))     # empty space for layout balance
         for label, val in choices:
             btn = Button(text=val, size_hint_y=None, height=40)
             btn.bind(on_press=lambda *_ ,v=val: (on_success(v), popup.dismiss()))
@@ -133,10 +136,12 @@ def text_popup(title, hint, get_current, validate, on_success):
         return wrapped
     return deco
 
-def choice_popup(title, get_current, choices, on_success):
+def choice_popup(title, get_current, choices, on_success, flag_popup: str = None):
     def deco(fn):
         @wraps(fn)
         def wrapped(self, *args, **kwargs):
+            if flag_popup and getattr(self, flag_popup, False):
+                return fn(self, *args, **kwargs)
             def _on_choice(v):
                 on_success(self, v)
                 fn(self, v, *args, **kwargs)
@@ -149,10 +154,13 @@ def choice_popup(title, get_current, choices, on_success):
         return wrapped
     return deco
 
-def combo_popup(title, get_current, hint, validate, choices, on_success):
+def combo_popup(title, get_current, hint, validate, choices, on_success, flag_popup: str = None):
     def deco(fn):
         @wraps(fn)
         def wrapped(self, *args, **kwargs):
+            if flag_popup and getattr(self, flag_popup, False):
+                return fn(self, *args, **kwargs)
+            # else, show the combo popup
             def _on_choice(v):
                 on_success(self, v)
                 fn(self, v, *args, **kwargs)
@@ -189,6 +197,9 @@ class MainScreen(Screen, PopupMixin):
         self._init_buttons()
         self.layout.add_widget(self.status_layout)
         self.layout.add_widget(self.button_layout)
+        self.filter_chosen = False
+        self.sample_chosen = False
+        
         self.add_widget(self.layout)
 
     def _init_labels(self):
@@ -278,10 +289,12 @@ class MainScreen(Screen, PopupMixin):
         on_success=lambda self, fid: (
             self.setup.move_filter(fid),
             setattr(self.label_filter_status,
-                     'text', f"Filter: {fid} - " + FILTERS[fid].split('_')[0].replace('Center-', '') + " 🚦" if fid != 0 else "Filter: None 🚦"),
-        )
+                    'text', f"Filter: {fid} - " + FILTERS[fid].split('_')[0].replace('Center-', '') + " 🚦" if fid != 0 else "Filter: None 🚦"),
+            )
     )
-    def choose_filter(self): pass
+    def choose_filter(self, *_): 
+        self.filter_chosen = True
+        pass
 
     @combo_popup(
         title="Set Sample",
@@ -294,7 +307,9 @@ class MainScreen(Screen, PopupMixin):
             setattr(self.label_sample_status, 'text', f"Sample: {val} 🧫🦠🧬"),
         )
     )
-    def set_sample_name(self, *_):
+    def set_sample_name(self, val, *_):
+        self.setup.settings.at['SAMPLE_NAME', 'value'] = val
+        self.sample_chosen = True
         pass
     
     @combo_popup(
@@ -335,7 +350,8 @@ class MainScreen(Screen, PopupMixin):
             self.setup.move_filter(fid),
             setattr(self.label_filter_status,
                      'text', f"Filter: {fid} - " + FILTERS[fid].split('_')[0].replace('Center-', '') + " 🚦" if fid != 0 else "Filter: None 🚦"),
-        )
+        ),
+        flag_popup='filter_chosen',
     )   
     @combo_popup(
         title="Set Sample",
@@ -345,14 +361,29 @@ class MainScreen(Screen, PopupMixin):
         choices=[(key, name) for key, name in SAMPLES.items() if name != 'quit' and name != 'other'],
         on_success=lambda self, val: (
             print(f"Sample set to: {val}"),
-            setattr(self.label_sample_status, 'text', f"Sample: {val} 🧫🦠🧬"),
+            setattr(self.label_sample_status, 'text', f"{val}"),
+        ),
+        flag_popup='sample_chosen',
+    )
+    @combo_popup(
+        title="Select number of frames",
+        get_current=lambda self: f"Number of frames: (1 - 400)",
+        hint="Type exact number...",
+        validate=_validate_nonempty_text,
+        choices=[(str(key), str(key)) for key in NFRAMES],
+        on_success=lambda self, val: (
+            print(f"Selected {val} frames"),
         )
     )
-    def manage_time_evolution(self, val, *_):
+    def manage_time_evolution(self, n_frames, *_):
         # grab the current sample name
         print('Entering manage_time_evolution after decorator')
-        self.setup.settings.at['SAMPLE_NAME', 'value'] = val
-        name = self.setup.settings.loc['SAMPLE_NAME', 'value']
+        sample_name = self.label_sample_status.text
+        self.setup.settings.at['SAMPLE_NAME', 'value'] = sample_name
+        setattr(self.label_sample_status, 'text', f"Sample: {sample_name} 🧫🦠🧬"),
+        n_frames = int(n_frames)
+        print('Sample name: ', sample_name)
+        print('Number of frames: ', n_frames)
         # if there’s already a TrajectoryScreen, remove it:
         if self.manager.has_screen('trajectories'):
             self.manager.remove_widget(self.manager.get_screen('trajectories'))
@@ -361,9 +392,9 @@ class MainScreen(Screen, PopupMixin):
         spec = TrajectoryScreen(
             name= 'trajectories',
             setup= self.setup,
-            sample_name= name,
+            sample_name= sample_name,
             filter_id= self.setup.filter_id,
-            n_frames = 10,
+            n_frames = n_frames,
         )
         self.manager.add_widget(spec)
         self.manager.current = 'trajectories'
