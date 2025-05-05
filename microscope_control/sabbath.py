@@ -137,6 +137,9 @@ def choice_popup(title, get_current, choices, on_success):
     def deco(fn):
         @wraps(fn)
         def wrapped(self, *args, **kwargs):
+            def _on_choice(v):
+                on_success(self, v)
+                fn(self, v, *args, **kwargs)
             self._show_choice_popup(
                 title=title,
                 current_text=get_current(self),
@@ -465,12 +468,8 @@ class SpectrumScreen(Screen):
         root.add_widget(self.mpl_canvas)
 
         # Continue button, initially disabled:
-        self.continue_btn = Button(
-            text="Continue ✔️", font_name='EmojiFont',
-            size_hint=(1, None), 
-            height=50, 
-            disabled=True
-        )
+        self.continue_btn = Button(text="Continue ✔️", font_name='EmojiFont',
+            size_hint=(1, None), height=50, disabled=True)
         # When pressed, switch back to main screen:
         self.continue_btn.bind(on_press=lambda *_: setattr(self.manager, 'current', 'main'))
         root.add_widget(self.continue_btn)
@@ -530,7 +529,6 @@ class SpectrumScreen(Screen):
             self.ax.set_title(f"Spectrum for {self.sample_name}")
             self.mpl_canvas.draw()
 
-
 ### ========== Single image Screen ==========
 
 class ImageScreen(Screen):
@@ -539,29 +537,20 @@ class ImageScreen(Screen):
         self.setup       = setup
         self.sample_name = sample_name
 
-        # 1) Build your UI on the main thread:
         root = BoxLayout(orientation='vertical')
         self.fig, self.ax = plt.subplots()
         self.mpl_canvas = FigureCanvasKivyAgg(self.fig)
         root.add_widget(self.mpl_canvas)
 
-        # Continue button, initially disabled:
-        self.continue_btn = Button(
-            text="Continue ✔️", font_name='EmojiFont',
-            size_hint=(1, None), 
-            height=50, 
-            disabled=False
-        )
+        # Continue button,
+        self.continue_btn = Button(text="Continue ✔️", font_name='EmojiFont',
+            size_hint=(1, None), height=50, disabled=True)
         # When pressed, switch back to main screen:
         self.continue_btn.bind(on_press=lambda *_: setattr(self.manager, 'current', 'main'))
         root.add_widget(self.continue_btn)
 
-        self.save_btn = Button(
-            text="Save Image 💾", font_name='EmojiFont',
-            size_hint=(1, None), 
-            height=50, 
-            disabled=False
-        )
+        self.save_btn = Button(text="Save Image 💾", font_name='EmojiFont',
+            size_hint=(1, None), height=50, disabled=False)
         # When pressed, save image:
         self.save_btn.bind(on_press=lambda *_: self.save_image(img))
         root.add_widget(self.save_btn)
@@ -585,7 +574,6 @@ class ImageScreen(Screen):
         self.ax.set_title(f"Image for {self.sample_name}")
         self.mpl_canvas.draw()
         
-    
     def save_image(self, img):
         # Save the image using the save_tif_set function
         power = self.setup.get_power()
@@ -596,6 +584,113 @@ class ImageScreen(Screen):
         
         single_tif_save(img, save_path, self.sample_name, power, self.setup.filter_id)
         print(f"Image saved to: {save_path}")
+
+
+class TrajectoryScreen(Screen):
+    def __init__(self, setup, sample_name, filter_id, n_frames=10, **kwargs):
+        super().__init__(**kwargs)
+        self.setup       = setup
+        self.sample_name = sample_name
+        self.filter_id   = filter_id
+        self.n_frames    = n_frames
+
+        # container
+        root = BoxLayout(orientation='vertical', spacing=10, padding=10)
+
+        # 1) Loading widgets
+        self.loading_label = Label(text="Loading frames...", size_hint=(1, None), height=30)
+        self.progress      = ProgressBar(max=self.n_frames, value=0, size_hint=(1, None), height=20)
+        root.add_widget(self.loading_label)
+        root.add_widget(self.progress)
+
+        # 2) Matplotlib canvas, hidden until data ready
+        self.fig, self.ax = plt.subplots()
+        self.mpl_canvas   = FigureCanvasKivyAgg(self.fig)
+        self.mpl_canvas.opacity = 0.0
+        root.add_widget(self.mpl_canvas)
+
+        # 3) Buttons, disabled until data ready
+        self.continue_btn = Button(text="Continue", size_hint=(1, None), height=40, disabled=True)
+        self.continue_btn.bind(on_press=lambda *_: setattr(self.manager, 'current', 'main'))
+        root.add_widget(self.continue_btn)
+
+        self.save_plot_btn = Button(text="Save Plot", size_hint=(1, None), height=40, disabled=True)
+        # bind your save logic...
+        root.add_widget(self.save_plot_btn)
+
+        self.save_img_btn = Button(text="Save Images", size_hint=(1, None), height=40, disabled=True)
+        # bind your save‐images logic...
+        root.add_widget(self.save_img_btn)
+
+        self.add_widget(root)
+
+        # 4) Start acquisition in a background thread
+        threading.Thread(target=self._acquire_loop, daemon=True).start()
+
+
+    def _acquire_loop(self):
+        # ensure camera is ready
+        if not self.setup.cam.is_opened():
+            self.setup.cam.open()
+        self.setup.open_shutter()
+
+        frames = self.setup.cam.grab(self.n_frames)
+
+        self.setup.close_shutter()
+        # schedule per‐frame progress updates
+        for idx, frame in enumerate(frames, start=1):
+            total = frame.sum()
+            Clock.schedule_once(lambda dt, i=idx, t=total: self._update_progress(i, t))
+
+        # once complete, schedule the “finish” on UI thread
+        Clock.schedule_once(lambda dt, f=frames: self._finish_acquisition(f), 0)
+
+
+    def _update_progress(self, frame_index, sum_val):
+        # update the bar
+        self.progress.value = frame_index
+        # you could also store sums if you want to plot them gradually
+
+    def _finish_acquisition(self, frames):
+        # compute trajectory & time
+        trajectory = [f.sum() for f in frames]
+        times      = [i * self.setup.texp for i in range(len(trajectory))]
+
+        # remove loading widgets
+        self.loading_label.parent.remove_widget(self.loading_label)
+        self.progress.parent.remove_widget(self.progress)
+
+        # draw the trajectory
+        self.ax.plot(times, trajectory, marker='o', linestyle='-')
+        self.ax.set(xlabel='Time (s)',
+                    ylabel='Sum of pixels',
+                    title=f"Trajectory for {self.sample_name}, filter {self.filter_id}")
+        self.mpl_canvas.draw()
+        self.mpl_canvas.opacity = 1.0
+
+        # enable buttons
+        self.continue_btn.disabled   = False
+        self.save_plot_btn.disabled  = False
+        self.save_img_btn.disabled   = False
+        
+    def save_plot(self, fig):
+        # Save the image using the save_tif_set function
+        rootpath = IMAGE_TIMERUN_SAVE_LOCATION
+        save_path = check_path_save(rootpath, self.sample_name, filters=None)
+        self.setup.settings.loc['POWER(uW)', 'value'] = round(self.power, 2)
+        write_settings(save_path, self.setup.settings)
+        
+        self.fig.savefig(save_path + '\fluorescence_trajectory.png', dpi=300)
+        print(f"Image saved to: {save_path}")
+
+    def save_images(self, frames):
+        rootpath = IMAGE_TIMERUN_SAVE_LOCATION
+        save_path = check_path_save(rootpath, self.sample_name, filters=None)
+        self.setup.settings.loc['POWER(uW)', 'value'] = round(self.power, 2)
+        write_settings(save_path, self.setup.settings)
+        for n, frame in enumerate(frames):
+            path_file = save_path + '\\' + FILTERS[self.filter_id] + '_' + '_P_' + str(self.power) + 'uW_frame_' + str(n).zfill(3) +'.tif'
+            io.imsave(path_file, frame)
 
 ### ========== App ==========
 
