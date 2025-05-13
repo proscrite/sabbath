@@ -29,7 +29,7 @@ from pylablib.devices.Thorlabs import KinesisMotor
 # from quick_spectra import analyse_spectrum
 # from get_trajectories import analyse_trajectories
 # from analyse_power_ramps import analyse_ramp
-# from dynamic_roi_draw import run_roi_selector
+from imag_analysis.dynamic_roi_draw import run_roi_selector
 
 
 data_struct = np.dtype([('date', 'double'), ('power', 'double'), ('name', str), ('images', (np.uint16, (24, 2048, 2048)))])

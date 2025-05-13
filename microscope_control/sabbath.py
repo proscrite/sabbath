@@ -504,6 +504,8 @@ class SpectrumScreen(Screen):
         super().__init__(**kwargs)
         self.setup       = setup
         self.sample_name = sample_name
+        self.save_path = check_path_save(IMAGE_SET_SAVE_LOCATION, self.sample_name, filters=None)
+        
         self.filt_stats = pd.read_csv(FILTER_PATH)
         self.filt_center = self.filt_stats['central_lambda'].astype(float)[:10]
         self.filt_center = self.filt_center[::-1]
@@ -516,12 +518,9 @@ class SpectrumScreen(Screen):
         self.mpl_canvas = FigureCanvasKivyAgg(self.fig)
         root.add_widget(self.mpl_canvas)
 
-        # Continue button, initially disabled:
-        self.continue_btn = Button(text="Continue ✔️", font_name='EmojiFont',
-            size_hint=(1, None), height=50, disabled=True)
-        # When pressed, switch back to main screen:
-        self.continue_btn.bind(on_press=lambda *_: setattr(self.manager, 'current', 'main'))
-        root.add_widget(self.continue_btn)
+        self.button_grid = GridLayout(cols=2, size_hint=(1, None), height=100)
+        self._init_buttons()
+        root.add_widget(self.button_grid)
 
         self.add_widget(root)
 
@@ -532,10 +531,39 @@ class SpectrumScreen(Screen):
         # 2) Launch the hardware loop in a background thread
         threading.Thread(target=self._acquire_loop, daemon=True).start()
 
+    def _init_buttons(self, *_):
+        # Continue button, initially disabled:
+        self.continue_btn = Button(text="Continue ✔️", font_name='EmojiFont',
+            size_hint=(1, None), height=50, disabled=True)
+        # When pressed, switch back to main screen:
+        self.continue_btn.bind(on_press=lambda *_: setattr(self.manager, 'current', 'main'))
+        
+        self.cancel_btn = Button(text="Cancel ❌", font_name='EmojiFont',
+                size_hint=(1, None), height=50, disabled=False)
+        # When pressed, switch back to main screen:
+        self.cancel_btn.bind(on_press=lambda *_: self.cancel_spectrum())
+
+        self.btn_save_plot = Button(text="Save Figure 💾📉", font_name='EmojiFont',
+                                    size_hint=(1, None), height=50, disabled=True)
+        self.btn_save_plot.bind(on_press=lambda *_: self.save_plot())
+
+        self.btn_save_images = Button(text="Save Images 💾📸", font_name='EmojiFont',
+                                    size_hint=(1, None), height=50, disabled=True)
+        self.btn_save_images.bind(on_press=lambda *_: self.save_images())
+        
+        # Add buttons to the grid layout
+        self.button_grid.add_widget(self.continue_btn)
+        self.button_grid.add_widget(self.cancel_btn)
+        self.button_grid.add_widget(self.btn_save_plot)
+        self.button_grid.add_widget(self.btn_save_images)
+    
     def _acquire_loop(self):
         # Loop over filters 1→12
-        images = []
+        self.images = []
+        self.daq_times = []
         powers = []
+        print("Starting spectrum acquisition...")
+        print("Current ROI: ", self.setup.roi)
         for fid in range(12, 0, -1):
             # set filter, snap image
             self.setup.wheel.set_filter(fid)
@@ -543,22 +571,42 @@ class SpectrumScreen(Screen):
             power_i = self.setup.get_power() * 1e6  # in uW
             powers.append(power_i)
             img = self.setup.cam.snap(timeout=15)
+            t = time.strftime('_%H-%M-%S', time.localtime())
+            self.daq_times.append(t)
             self.setup.close_shutter()
 
-            images.append(img)
+            self.images.append(img)
+            imroi = img[self.setup.roi[0]:self.setup.roi[1], self.setup.roi[2]:self.setup.roi[3]]
             # compute sum of pixels
-            total = img.sum()
+            total = imroi.sum()
 
             # schedule a UI update
             Clock.schedule_once(lambda dt, f=fid, s=total: self._update_plot(f, s))
 
-        avg_power = sum(powers) / len(powers)
-        save_path = save_tif_set(images, self.sample_name, power=avg_power)
-
-        self.setup.settings.loc['POWER(uW)', 'value'] = round(avg_power, 2)
-        write_settings(save_path, self.setup.settings)
-        print(f"Images saved to: {save_path}")
+        self.avg_power = sum(powers) / len(powers)
         Clock.schedule_once(lambda dt: setattr(self.continue_btn, 'disabled', False))
+        self.btn_save_plot.disabled = False
+        self.btn_save_images.disabled = False
+
+    def save_plot(self, *_):
+        """Save the figure to the specified path."""        
+        self.fig.savefig(self.save_path + f"\\{self.sample_name}_spectrum.png", dpi=300, bbox_inches='tight')
+        write_settings(self.save_path, self.setup.settings)
+
+        print(f"Figure saved to: {self.save_path}")
+        self.btn_save_plot.text = f"Figure saved! 💾📉✅️"
+        self.btn_save_plot.disabled = True
+
+    def save_images(self, *_):
+        self.setup.settings.loc['POWER(uW)', 'value'] = round(self.avg_power, 2)
+        write_settings(self.save_path, self.setup.settings)
+        filter_ids = range(12, 0, -1)
+        for fid, img, time_daq in zip(filter_ids, self.images, self.daq_times):
+            file_savepath = self.save_path + '\\' + str(FILTERS[fid]) + time_daq + '.tif'
+            io.imsave(file_savepath, img)
+        print(f"Images saved to: {self.save_path}")
+        self.btn_save_images.text = f"Images saved! 💾📸✅️"
+        self.btn_save_images.disabled = True
 
     def _update_plot(self, filter_id, sum_val):
         # collect
@@ -578,6 +626,16 @@ class SpectrumScreen(Screen):
             self.ax.set_title(f"Spectrum for {self.sample_name}")
             self.mpl_canvas.draw()
 
+    def cancel_spectrum(self, *_):
+        # remove the screen and go back to main
+        self.setup.cam._wait_for_next_frame()
+        # self.setup.cam.close()
+        self.setup.close_shutter()
+        self.setup.move_filter(1)
+        Clock.schedule_once(lambda dt: setattr(self.continue_btn, 'disabled', False))
+        self.manager.current = 'main'
+        self.manager.remove_widget(self.manager.get_screen('spectrum'))
+
 ### ========== Single image Screen ==========
 
 class ImageScreen(Screen):
@@ -593,7 +651,7 @@ class ImageScreen(Screen):
 
         # Continue button,
         self.continue_btn = Button(text="Continue ✔️", font_name='EmojiFont',
-            size_hint=(1, None), height=50, disabled=True)
+            size_hint=(1, None), height=50, disabled=False)
         # When pressed, switch back to main screen:
         self.continue_btn.bind(on_press=lambda *_: setattr(self.manager, 'current', 'main'))
         root.add_widget(self.continue_btn)
@@ -618,6 +676,11 @@ class ImageScreen(Screen):
 
     def display_image(self, img):
         # Display the image using matplotlib
+
+        if self.setup.roi is not None:
+            # Draw the ROI on the image
+            draw_roi(self.ax, self.setup.roi)
+            
         axob = self.ax.imshow(img)
         plt.colorbar(axob, ax=self.ax)
         self.ax.set_title(f"Image for {self.sample_name}")
@@ -632,6 +695,7 @@ class ImageScreen(Screen):
         write_settings(save_path, self.setup.settings)
         
         single_tif_save(img, save_path, self.sample_name, power, self.setup.filter_id)
+        self.save_btn.text = f"Image saved! 💾✅️"
         print(f"Image saved to: {save_path}")
 
 
@@ -706,7 +770,8 @@ class TrajectoryScreen(Screen):
 
     def _finish_acquisition(self, frames):
         # compute trajectory & time
-        trajectory = [f.sum() for f in frames]
+        frames_roi = [f[self.setup.roi[0]:self.setup.roi[1], self.setup.roi[2]:self.setup.roi[3]] for f in frames]
+        trajectory = [f.sum() for f in frames_roi]
         times      = [i * self.setup.texp for i in range(len(trajectory))]
         self.save_img_btn.bind(on_press=lambda *_: self.save_images(frames))
 
@@ -719,6 +784,9 @@ class TrajectoryScreen(Screen):
         self.ax[0].set(xlabel='Time (s)', ylabel='Sum of pixels', title=f"Trajectory for {self.sample_name}, filter {self.filter_id}")
 
         axob = self.ax[1].imshow(frames[0])
+        if self.setup.roi is not None:
+            # Draw the ROI on the image
+            draw_roi(self.ax[1], self.setup.roi)
         self.ax[1].set_title(f"Image and ROI")
         plt.colorbar(axob, ax=self.ax[1])
         
@@ -744,11 +812,12 @@ class TrajectoryScreen(Screen):
         """Save the frames to a file."""
         self.setup.settings.loc['POWER(uW)', 'value'] = round(self.power, 2)
         write_settings(self.save_path, self.setup.settings)
+        path_file = self.save_path + '\\' + FILTERS[self.filter_id] + '_' + '_P_' + str(self.power) 
         for n, frame in enumerate(frames):
-            path_file = self.save_path + '\\' + FILTERS[self.filter_id] + '_' + '_P_' + str(self.power) + 'uW_frame_' + str(n).zfill(3) +'.tif'
+            path_file += 'uW_frame_' + str(n).zfill(3) +'.tif'
             io.imsave(path_file, frame)
         
-        self.save_img_btn.text = f"Images saved! Measurement nr: {self.measurement_nr} 💾📉✅️" 
+        self.save_img_btn.text = f"Images saved! Measurement nr: {self.measurement_nr} 💾📸✅️" 
         self.save_img_btn.disabled = True
         
 
