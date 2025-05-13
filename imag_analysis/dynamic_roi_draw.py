@@ -3,33 +3,20 @@ from skimage import io
 import numpy as np
 import matplotlib.pyplot as plt
 
+def draw_roi(ax, roi):
+    # Draw a rectangle on the image based on the ROI coordinates
+    top_left = (roi[0], roi[1])
+    width = roi[1] - roi[0]
+    height = roi[2] - roi[1]
+    dynamic_rect = plt.Rectangle(top_left, width, height, edgecolor='red',
+                                    facecolor='none', linewidth=2)
+    ax.add_patch(dynamic_rect)
+
 def run_roi_selector(image):
     # Initialize variables to manage the clicks and rectangle patch
     click_positions = []
     dynamic_rect = None  # This will hold the rectangle patch
     final_roi = None   # To store the finalized ROI coordinates
-    dynamic_rect = None  # Holds the rectangle patch
-
-    def update_rectangle(event):
-        nonlocal dynamic_rect, click_positions
-        if event.xdata is None or event.ydata is None:
-            return
-
-        # Calculate rectangle coordinates based on the first click and current mouse position
-        x1, y1 = click_positions[0]
-        x2, y2 = int(event.xdata), int(event.ydata)
-        top_left = (min(x1, x2), min(y1, y2))
-        width = abs(x2 - x1)
-        height = abs(y2 - y1)
-
-        # Create the rectangle patch on the first call; update it on subsequent calls
-        if dynamic_rect is None:
-            dynamic_rect = plt.Rectangle(top_left, width, height, edgecolor='red',
-                                         facecolor='none', linewidth=2)
-            ax.add_patch(dynamic_rect)
-        else:
-            dynamic_rect.set_xy(top_left)
-            dynamic_rect.set_width(width)
     dynamic_rect = None  # Holds the rectangle patch
 
     def update_rectangle(event):
@@ -102,5 +89,6 @@ def run_roi_selector(image):
 
 # If run as a script, execute the ROI selector and print the result.
 if __name__ == '__main__':
-    roi = run_roi_selector()
+    image = io.imread(r'G:\My Drive\Ba Tagging\data\img\sets\08-04-25\Rhodamine-B 50 µM 270225\6\Center-NA_Width-NA_14-40-22.tif').astype(np.int64)  # Replace with your image path
+    roi = run_roi_selector(image)
     print("Returned ROI:", roi)
