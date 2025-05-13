@@ -39,6 +39,8 @@ from microscope_control.SetupSettings import write_settings
 from microscope_control.Constants import *
 from .main import Setup  # your actual Setup class
 
+from microscope_control.screen_roi_selection import ROI_selection_screen, draw_roi
+
 # # 1) Create a shared context:
 # FCM.create('emoji_greek')
 # # 2) Add seguiemj.ttf (color emoji) and a Greek font:
@@ -222,7 +224,7 @@ class MainScreen(Screen, PopupMixin):
         self._add_button('Power ramp 🔌', self.setup.power_ramp)
         self._add_button('Live Camera 🎥', self.manage_live_cam)
         self._add_button('Set Sample name 🧫', self.set_sample_name)
-        self._add_button('Set ROI 🎯', self.setup.select_ROI)
+        self._add_button('Set ROI 🎯', self.manage_ROI)
         self._add_button('Set Filter 🚥', self.choose_filter)
         self._add_button('Set Exposure 💥', self.manage_exposure)
         self._add_button('Move Z Position 🎮 ', self.manage_zpos)
@@ -236,7 +238,6 @@ class MainScreen(Screen, PopupMixin):
         lb = Label(text=text, font_name = 'EmojiFont', font_size=18, size_hint=(1, 0.2))
         self.status_layout.add_widget(lb)
         return lb
-
 
     def _add_button(self, text, func):
         btn = Button(text=text, font_name = 'EmojiFont', size_hint=(None, None), size=(200, 50))
@@ -399,17 +400,34 @@ class MainScreen(Screen, PopupMixin):
         self.manager.add_widget(spec)
         self.manager.current = 'trajectories'
     
-    @choice_popup(
-        title="Confirmation",
-        get_current=lambda self: f"Current: {self.setup.settings.get('SAMPLE_NAME', 'value')} ",
-        choices=[("Yes", True), ("No", False)],
-        on_success=lambda self, val: (
-            setattr(self.setup.settings.loc['SAMPLE_NAME', 'value'], val),
-            setattr(self.label_sample_status, 'text', f"Sample: {val} 🧫🦠🧬"
-                     if val else setattr(self.label_sample_status, 'text', f"Sample: None', ")),
+
+    def manage_ROI_type(self, *_):
+        grid = GridLayout(cols=1, spacing=10, size_hint_y=None)
+        grid.bind(minimum_height=grid.setter('height'))
+        btn_hardware = Button(text='Hardware ROI', size_hint_y=None, height=30)
+        btn_hardware.bind(on_press=lambda *_: self.set_ROI_hardware())
+        grid.add_widget(btn_hardware)
+
+        btn_software = Button(text='Analysis ROI', size_hint_y=None, height=30)
+        btn_software.bind(on_press=lambda *_: self.set_ROI_analysis())
+        grid.add_widget(btn_software)
+
+        popup = Popup(title='Select ROI type', content=grid, size_hint=(0.3, 0.3))
+        popup.open()
+
+    def manage_ROI(self, *_):
+    # If it already exists, drop the old screen
+        if self.manager.has_screen('roi_analysis'):
+            self.manager.remove_widget(
+                self.manager.get_screen('roi_analysis')
+            )
+        # Push our new ROI‐drawing screen
+        screen = ROI_selection_screen(
+            name='roi_analysis',
+            setup=self.setup
         )
-    )
-    def confirmation_popup(self): pass
+        self.manager.add_widget(screen)
+        self.manager.current = 'roi_analysis'
 
     def print_power_label(self, *_):
         power = self.setup.get_power()
