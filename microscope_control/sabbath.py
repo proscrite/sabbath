@@ -38,8 +38,13 @@ from microscope_control.saving import *
 from microscope_control.SetupSettings import write_settings
 from microscope_control.Constants import *
 from .main import Setup  # your actual Setup class
+<<<<<<< Updated upstream
 
 from microscope_control.screen_roi_selection import ROI_selection_screen, draw_roi
+=======
+from .autofocus_whitelight import autofocus_whitelight
+from microscope_control.screen_roi_selection import ROI_selection_screen, draw_roi, get_cutoff
+>>>>>>> Stashed changes
 
 # # 1) Create a shared context:
 # FCM.create('emoji_greek')
@@ -186,7 +191,7 @@ class MainScreen(Screen, PopupMixin):
         self.setup.init_settings()
         self.setup.open_all_devices()
         self.layout = FloatLayout()
-        self.status_layout = GridLayout(cols=2, padding=10, spacing=10,
+        self.status_layout = GridLayout(cols=4, padding=10, spacing=15,
                                 size_hint=(None, None),
                                 size=(600, 200),              # Adjust size of grid manually
                                 pos_hint={"center_x": 0.5, "top": 0.9})
@@ -208,12 +213,19 @@ class MainScreen(Screen, PopupMixin):
         zpos = self.setup.read_zpos()
         power = self.setup.get_power()
         filter_id = self.setup.filter_id
-        self.label_shutter_status = self._add_label(text=f"Shutter: Closed 🚫")
-        self.label_status_z = self._add_label(text=f"Z Position: {zpos} 🕹️")
-        self.label_exposure_status = self._add_label(text="Exposure: 0.5 s ⏳")
-        self.label_filter_status = self._add_label(text=f"Filter: {filter_id} NA 🚦 - " + FILTERS[self.setup.filter_id].split('_')[0].replace('Center-', ''))
-        self.label_sample_status = self._add_label(text=f"Sample: {self.setup.settings.get('SAMPLE_NAME', 'value')} 🧫🦠🧬")
-        self.label_power = self._add_label(text=f"Power: {power * 1e6:.2f} uW 🔋⚡")
+        proportions = [40, 300]
+        self.icon_shutter_status = self._add_label(text="🚫", font_size=30, x_proportion=proportions[0])
+        self.label_shutter_status = self._add_label(text=f"Shutter: Closed ", x_proportion=proportions[1])
+        self._add_label(text="🕹️", font_size=30, x_proportion=proportions[0])
+        self.label_status_z = self._add_label(text=f"Z Position: {zpos} mm ", x_proportion=proportions[1])
+        self._add_label(text="⏳", font_size=30, x_proportion=proportions[0])
+        self.label_exposure_status = self._add_label(text="Exposure: 0.5 s ", x_proportion=proportions[1])
+        self._add_label(text="🚦", font_size=30, x_proportion=proportions[0])
+        self.label_filter_status = self._add_label(text=f"Filter: {filter_id} - 575 nm", x_proportion=proportions[1])
+        self._add_label(text="🧬", font_size=30, x_proportion=proportions[0])
+        self.label_sample_status = self._add_label(text=f"Sample: Rhodamine-B 50 nM 140525", x_proportion=proportions[1])
+        self._add_label(text="🔋", font_size=30, x_proportion=proportions[0])
+        self.label_power = self._add_label(text=f"Power: {power * 1e6:.2f} uW ", x_proportion=proportions[1])
         
         self.status_layout.add_widget(Label(text=""))  # Empty space for layout balance
 
@@ -234,11 +246,12 @@ class MainScreen(Screen, PopupMixin):
         self._add_button('Settings ⚙️', self.show_settings_menu)
 
 
-    def _add_label(self, text):
-        lb = Label(text=text, font_name = 'EmojiFont', font_size=18, size_hint=(1, 0.2))
+    def _add_label(self, text, font_size=18, x_proportion = 200):
+        lb = Label(text=text, font_name = 'EmojiFont', font_size=font_size, size_hint_x=None, width = x_proportion,
+                    halign='left', valign='middle', text_size=(None, None))
+        lb.bind(size=lambda l, s: setattr(l, 'text_size', (s[0], None)))
         self.status_layout.add_widget(lb)
         return lb
-
     def _add_button(self, text, func):
         btn = Button(text=text, font_name = 'EmojiFont', size_hint=(None, None), size=(200, 50))
         btn.bind(on_press=lambda *_: func())
@@ -258,17 +271,92 @@ class MainScreen(Screen, PopupMixin):
         self.manager.add_widget(spec)
         self.manager.current = 'single_image'
 
-    @text_popup(
-        title="Set Z Position",
-        hint="Z in mm",
-        get_current=lambda self: f"Current Z: {self.setup.read_zpos():.3f} 🕹️",
-        validate=float,
-        on_success=lambda self, z: (
-            self.setup.move_zpos(z),
-            setattr(self.label_status_z, 'text', f"Z Position: {z:.3f} 🕹️")
-        )
-    )
-    def manage_zpos(self): pass
+    def manage_zpos(self):
+        # Popup to adjust Z position with step buttons and direct-input until "Continue" is pressed
+        layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        # Current position label
+        self.zpos_label = Label(text=f"Z Position: {self.setup.read_zpos():.3f} mm 🕹️",
+                      font_name='EmojiFont', size_hint_y=None, height=40)
+        layout.add_widget(self.zpos_label)
+
+        # TextInput for direct jump to position
+        self.ti_select_position = TextInput(hint_text='Enter position in mm',
+                                           font_name='EmojiFont', multiline=False,
+                                           size_hint_y=None, height=40)
+        # bind enter key to validate and move
+        self.ti_select_position.bind(on_text_validate=lambda instance: self._validate_ztext_input())
+        layout.add_widget(self.ti_select_position)
+
+        # Container for step buttons
+        self.btn_layout = GridLayout(cols=4, spacing=10, size_hint_y=None, height=200)
+        
+        # helper to add +/- buttons
+        def add_step_buttons(val):
+            for sign in (+1, -1):
+                btn = Button(text=f"{sign*val:+.2f} mm", font_name='EmojiFont',
+                             size_hint_y=None, height=40)
+                # wrap move to disable/enable
+                def _on_press(step, button):
+                    # disable all buttons while moving
+                    for child in self.btn_layout.children:
+                        child.disabled = True
+                    self.ti_select_position.disabled = True
+                    # perform move
+                    self.setup.move_zpos_step(step)
+                    # update labels
+                    pos = self.setup.read_zpos()
+                    self.zpos_label.text = f"Z Position: {pos:.3f} mm 🕹️"
+                    self.label_status_z.text = f"Z Position: {pos:.3f}"
+                    # re-enable
+                    for child in self.btn_layout.children:
+                        child.disabled = False
+                    self.ti_select_position.disabled = False
+                btn.bind(on_press=lambda inst, s=sign*val, b=btn: _on_press(s, b))
+                self.btn_layout.add_widget(btn)
+        
+        # default steps
+        for step in [0.05, 0.1, 0.5, 1, 5]:
+            add_step_buttons(step)
+        layout.add_widget(self.btn_layout)
+
+        # TextInput to add custom step size
+        self.ti_step_size = TextInput(hint_text='Custom step (0.001–5 mm)',
+                                      font_name='EmojiFont', multiline=False,
+                                      size_hint_y=None, height=40, width=250)
+        def _validate_step_size(instance):
+            try:
+                v = float(self.ti_step_size.text)
+                if not 0.001 <= v <= 5:
+                    raise ValueError
+                add_step_buttons(v)
+                self.ti_step_size.text = ''
+            except Exception:
+                self.ti_step_size.text = '❌ invalid'
+        self.ti_step_size.bind(on_text_validate=lambda inst: _validate_step_size(inst))
+        self.btn_layout.add_widget(self.ti_step_size)
+
+        # Continue button to close
+        btn_continue = Button(text='Continue ✔️', font_name='EmojiFont',
+                              size_hint_y=None, height=40)
+        btn_continue.bind(on_press=lambda *_: popup.dismiss())
+        layout.add_widget(btn_continue)
+
+        # create and open popup
+        popup = Popup(title='Move Z Position', content=layout,
+                      size_hint=(0.7, 0.7))
+        popup.open()
+
+    def _validate_ztext_input(self):
+        try:
+            val = float(self.ti_select_position.text)
+            # move and update
+            self.setup.move_zpos(val)
+            pos = self.setup.read_zpos()
+            self.zpos_label.text = f"Z Position: {pos:.3f} mm 🕹️"
+            self.label_status_z.text = f"Z Position: {pos:.3f} 🕹️"
+            self.ti_select_position.text = ''
+        except Exception:
+            self.ti_select_position.text = '❌ invalid'
 
     @text_popup(
         title="Set Exposure",
@@ -277,7 +365,7 @@ class MainScreen(Screen, PopupMixin):
         validate=float,
         on_success=lambda self, t: (
             self.setup.set_exposure(t),
-            setattr(self.label_exposure_status, 'text', f"Exposure: {t:.2f}s ⏳")
+            setattr(self.label_exposure_status, 'text', f"Exposure: {t:.2f}s")
         )
     )
     def manage_exposure(self): pass
@@ -290,7 +378,7 @@ class MainScreen(Screen, PopupMixin):
         on_success=lambda self, fid: (
             self.setup.move_filter(fid),
             setattr(self.label_filter_status,
-                    'text', f"Filter: {fid} - " + FILTERS[fid].split('_')[0].replace('Center-', '') + " 🚦" if fid != 0 else "Filter: None 🚦"),
+                    'text', f"Filter: {fid} - " + FILTERS[fid].split('_')[0].replace('Center-', '') if fid != 0 else "Filter: None"),
             )
     )
     def choose_filter(self, *_): 
@@ -305,7 +393,7 @@ class MainScreen(Screen, PopupMixin):
         choices=[(key, name) for key, name in SAMPLES.items() if name != 'quit' and name != 'other'],
         on_success=lambda self, val: (
             print(f"Sample set to: {val}"),
-            setattr(self.label_sample_status, 'text', f"Sample: {val} 🧫🦠🧬"),
+            setattr(self.label_sample_status, 'text', f"Sample: {val}"),
         )
     )
     def set_sample_name(self, val, *_):
@@ -321,7 +409,7 @@ class MainScreen(Screen, PopupMixin):
         choices=[(key, name) for key, name in SAMPLES.items() if name != 'quit' and name != 'other'],
         on_success=lambda self, val: (
             print(f"Sample set to: {val}"),
-            setattr(self.label_sample_status, 'text', f"Sample: {val} 🧫🦠🧬"),
+            setattr(self.label_sample_status, 'text', f"Sample: {val}"),
         )
     )
     def manage_spectra(self, val, *_):
@@ -350,7 +438,7 @@ class MainScreen(Screen, PopupMixin):
         on_success=lambda self, fid: (
             self.setup.move_filter(fid),
             setattr(self.label_filter_status,
-                     'text', f"Filter: {fid} - " + FILTERS[fid].split('_')[0].replace('Center-', '') + " 🚦" if fid != 0 else "Filter: None 🚦"),
+                     'text', f"Filter: {fid} - " + FILTERS[fid].split('_')[0].replace('Center-', '') if fid != 0 else "Filter: None"),
         ),
         flag_popup='filter_chosen',
     )   
@@ -381,7 +469,7 @@ class MainScreen(Screen, PopupMixin):
         print('Entering manage_time_evolution after decorator')
         sample_name = self.label_sample_status.text
         self.setup.settings.at['SAMPLE_NAME', 'value'] = sample_name
-        setattr(self.label_sample_status, 'text', f"Sample: {sample_name} 🧫🦠🧬"),
+        setattr(self.label_sample_status, 'text', f"Sample: {sample_name}"),
         n_frames = int(n_frames)
         print('Sample name: ', sample_name)
         print('Number of frames: ', n_frames)
@@ -431,7 +519,7 @@ class MainScreen(Screen, PopupMixin):
 
     def print_power_label(self, *_):
         power = self.setup.get_power()
-        self.label_power.text = f"P: {power * 1e6:.2f} uW 🔋⚡"
+        self.label_power.text = f"P: {power * 1e6:.2f} uW"
         
     def manage_power(self, *_):
         pass
@@ -491,7 +579,8 @@ class MainScreen(Screen, PopupMixin):
             self.setup.toggle_shutter()
         shutter_state = self.setup.shutter_status
 
-        self.label_shutter_status.text = f"Shutter: {'Open 🟢' if shutter_state else 'Closed 🚫'}"
+        self.label_shutter_status.text = f"Shutter: {'Open' if shutter_state else 'Closed'}"
+        self.icon_shutter_status.text = '🟢' if shutter_state else '🚫'
         self.print_power_label()
 
     def manage_live_cam(self, *_):
@@ -506,6 +595,7 @@ class SpectrumScreen(Screen):
         self.sample_name = sample_name
         self.save_path = check_path_save(IMAGE_SET_SAVE_LOCATION, self.sample_name, filters=None)
         
+        self.abort = False
         self.filt_stats = pd.read_csv(FILTER_PATH)
         self.filt_center = self.filt_stats['central_lambda'].astype(float)[:10]
         self.filt_center = self.filt_center[::-1]
@@ -533,6 +623,7 @@ class SpectrumScreen(Screen):
 
     def _init_buttons(self, *_):
         # Continue button, initially disabled:
+    
         self.continue_btn = Button(text="Continue ✔️", font_name='EmojiFont',
             size_hint=(1, None), height=50, disabled=True)
         # When pressed, switch back to main screen:
@@ -565,6 +656,10 @@ class SpectrumScreen(Screen):
         print("Starting spectrum acquisition...")
         print("Current ROI: ", self.setup.roi)
         for fid in range(12, 0, -1):
+            if self.abort:
+                print("Spectrum acquisition aborted.")
+                break
+
             # set filter, snap image
             self.setup.wheel.set_filter(fid)
             self.setup.open_shutter()
@@ -590,11 +685,14 @@ class SpectrumScreen(Screen):
 
     def save_plot(self, *_):
         """Save the figure to the specified path."""        
-        self.fig.savefig(self.save_path + f"\\{self.sample_name}_spectrum.png", dpi=300, bbox_inches='tight')
-        write_settings(self.save_path, self.setup.settings)
-
+        fname = self.save_path + f"\\{self.sample_name}_spectrum.png"
+        self.fig.savefig(fname, dpi=300, bbox_inches='tight')
         print(f"Figure saved to: {self.save_path}")
         self.btn_save_plot.text = f"Figure saved! 💾📉✅️"
+        # Save the data to a CSV file
+        pd.DataFrame([self.processed_filters, self.processed_sums]).T.to_csv(fname.replace('.png', '_data.csv'), index=False, header=['Filter ID', 'Sum of pixels'])
+
+        write_settings(self.save_path, self.setup.settings)
         self.btn_save_plot.disabled = True
 
     def save_images(self, *_):
@@ -626,8 +724,9 @@ class SpectrumScreen(Screen):
             self.ax.set_title(f"Spectrum for {self.sample_name}")
             self.mpl_canvas.draw()
 
-    def cancel_spectrum(self, *_):
+    def cancel_spectrum(self, *_): 
         # remove the screen and go back to main
+        self.abort = True
         self.setup.cam._wait_for_next_frame()
         # self.setup.cam.close()
         self.setup.close_shutter()
@@ -680,8 +779,9 @@ class ImageScreen(Screen):
         if self.setup.roi is not None:
             # Draw the ROI on the image
             draw_roi(self.ax, self.setup.roi)
-            
-        axob = self.ax.imshow(img)
+
+        cutoff = get_cutoff(img, threshold=8)
+        axob = self.ax.imshow(img, clim = (100, cutoff))
         plt.colorbar(axob, ax=self.ax)
         self.ax.set_title(f"Image for {self.sample_name}")
         self.mpl_canvas.draw()
@@ -710,16 +810,13 @@ class TrajectoryScreen(Screen):
         # Estimate total time
         self.total_time = self.setup.texp * self.n_frames    # seconds
         self.step_time  = self.total_time / 100               # update every 1%
-        self.save_path = check_path_save(IMAGE_TIMERUN_SAVE_LOCATION, self.sample_name, filters=None)
+        self.save_path = check_path_save(IMAGE_TIMERUN_SAVE_LOCATION, self.sample_name, filters=self.filter_id)
         self.measurement_nr = self.save_path.split('\\')[-1]
         # container
         root = BoxLayout(orientation='vertical', spacing=10, padding=10)
 
-        # 1) Loading widgets
-        self.loading_label = Label(text="Loading frames... 🔄", font_name='EmojiFont', size_hint=(1, None), height=dp(200), size_hint_min_y=dp(100))
-        self.progress      = ProgressBar(max=1.0, value=0, size_hint=(1, None), height=200)
-        root.add_widget(self.loading_label)
-        root.add_widget(self.progress)
+        # 1) Loading labels and progress bar
+        self._init_labels(root)
 
         # 2) Matplotlib canvas, hidden until data ready
         self.fig, self.ax = plt.subplots(1, 2, figsize=(8, 4), dpi=100)
@@ -728,17 +825,9 @@ class TrajectoryScreen(Screen):
         root.add_widget(self.mpl_canvas)
 
         # 3) Buttons, disabled until data ready
-        self.continue_btn = Button(text="Continue ✔️", font_name='EmojiFont', size_hint=(1, None), height=40, disabled=True)
-        self.continue_btn.bind(on_press=lambda *_: setattr(self.manager, 'current', 'main'))
-        root.add_widget(self.continue_btn)
-
-        self.save_plot_btn = Button(text="Save Figure 💾📉", font_name='EmojiFont', size_hint=(1, None), height=40, disabled=True)
-        self.save_plot_btn.bind(on_press=lambda *_: self.save_plot())
-        root.add_widget(self.save_plot_btn)
-
-        self.save_img_btn = Button(text="Save Images 💾📸", font_name='EmojiFont', size_hint=(1, None), height=40, disabled=True)
-        root.add_widget(self.save_img_btn)
-
+        self.button_grid = GridLayout(rows=3, size_hint=(1, None), height=150)
+        self._init_buttons()
+        root.add_widget(self.button_grid)    
         self.add_widget(root)
 
         # 4) Kick off two tasks:
@@ -748,9 +837,58 @@ class TrajectoryScreen(Screen):
         #  B) background thread to do the actual grab
         threading.Thread(target=self._acquire_loop, daemon=True).start()
 
+    def _init_labels(self, root: BoxLayout):
+        # ensure vertical stacking
+        root.orientation = 'vertical'
+        root.spacing     = dp(10)
+        root.padding     = dp(10)
+
+        # common style for labels
+        label_kwargs = dict(font_name='EmojiFont', size_hint=(1, None),height=dp(40),)
+        
+        self.measurement_label = Label(text=f"Measurement #{self.measurement_nr}: {self.sample_name} · filter: {self.filter_id} · exposure: {self.setup.texp:.2f} s",
+            **label_kwargs)
+        self.end_label         = Label(text=f"Total {self.n_frames} frames · est. time: {self.total_time:.2f} s",
+            **label_kwargs)
+        self.loading_label     = Label(text="Loading frames… 🔄",
+            **label_kwargs)
+        self.progress          = ProgressBar(max=1.0, value=0, size_hint=(1, None), height=200)
+
+        self.status_label = Label(text=f"{self.progress.value:.0%}",
+            **label_kwargs)
+        root.add_widget(self.measurement_label)
+        root.add_widget(self.end_label)
+        root.add_widget(self.loading_label)
+        root.add_widget(self.status_label)
+        root.add_widget(self.progress)
+
+    def _init_buttons(self,):
+        # Continue button, initially disabled:
+        self.continue_btn = Button(text="Continue ✔️", font_name='EmojiFont',
+            size_hint=(1, None), height=50, disabled=True)
+        # When pressed, switch back to main screen:
+        self.continue_btn.bind(on_press=lambda *_: setattr(self.manager, 'current', 'main'))
+        
+        # Add buttons to the grid layout
+        self.button_grid.add_widget(self.continue_btn)
+
+
+        self.save_plot_btn = Button(text="Save Figure 💾📉", font_name='EmojiFont', size_hint=(1, None), height=40, disabled=True)
+        self.save_plot_btn.bind(on_press=lambda *_: self.save_plot())
+        self.button_grid.add_widget(self.save_plot_btn)
+        
+        self.save_img_btn = Button(text="Save Images 💾📸", font_name='EmojiFont', size_hint=(1, None), height=40, disabled=True)
+        self.button_grid.add_widget(self.save_img_btn)
+
+        
+
     def _update_time_progress(self, dt):
-        """Advance progress by 10% each tick; stop when we reach 100%."""
+        """Advance progress by 1% each tick; stop when we reach 100%."""
         self.progress.value += 0.01
+        self.acquisition_time = round(time.time() - self.start_time, 3)
+        self.status_label.text = f"{self.progress.value:.0%}"
+        self.end_label.text = f"Acquisition time: {self.acquisition_time:.2f} s, estimated time left: {self.total_time - self.acquisition_time:.2f} s"
+
         if self.progress.value >= 1.0:
             self.progress.value = 1.0
             Clock.unschedule(self._update_time_progress)
@@ -758,6 +896,7 @@ class TrajectoryScreen(Screen):
     def _acquire_loop(self):
         """Runs in a background thread, does the real camera work."""
         # ensure camera is ready
+        self.start_time = time.time()
         if not self.setup.cam.is_opened():
             self.setup.cam.open()
         self.setup.open_shutter()
@@ -771,19 +910,25 @@ class TrajectoryScreen(Screen):
     def _finish_acquisition(self, frames):
         # compute trajectory & time
         frames_roi = [f[self.setup.roi[0]:self.setup.roi[1], self.setup.roi[2]:self.setup.roi[3]] for f in frames]
-        trajectory = [f.sum() for f in frames_roi]
-        times      = [i * self.setup.texp for i in range(len(trajectory))]
+        size_roi = frames_roi[0].shape[0] * frames_roi[0].shape[1]
+        # compute the mean of pixels in the ROI for each frame
+        self.trajectory = [f.sum() / size_roi for f in frames_roi]
+        self.times      = [i * self.setup.texp for i in range(len(self.trajectory))]
         self.save_img_btn.bind(on_press=lambda *_: self.save_images(frames))
 
         # remove loading widgets
         self.loading_label.parent.remove_widget(self.loading_label)
         self.progress.parent.remove_widget(self.progress)
+        self.status_label.parent.remove_widget(self.status_label)
+        self.end_label.parent.remove_widget(self.end_label)
 
         # draw the trajectory
-        self.ax[0].plot(times, trajectory, marker='o', linestyle='-')
+        self.ax[0].plot(self.times, self.trajectory, marker='o', linestyle='-')
         self.ax[0].set(xlabel='Time (s)', ylabel='Sum of pixels', title=f"Trajectory for {self.sample_name}, filter {self.filter_id}")
 
-        axob = self.ax[1].imshow(frames[0])
+        cutoff = get_cutoff(frames[0], threshold=8)
+        axob = self.ax[1].imshow(frames[0], clim = (100, cutoff))
+    
         if self.setup.roi is not None:
             # Draw the ROI on the image
             draw_roi(self.ax[1], self.setup.roi)
@@ -804,6 +949,9 @@ class TrajectoryScreen(Screen):
         write_settings(self.save_path, self.setup.settings)
         fname = self.save_path + '/fluorescence_trajectory.png'
         self.fig.savefig(fname, dpi=300)
+        # Save the data to a CSV file
+        pd.DataFrame([self.times, self.trajectory]).T.to_csv(fname.replace('.png', '_data.csv'), index=False, header=['Time (s)', 'Sum of pixels'])
+
         self.save_plot_btn.text = f"Figure saved! Measurement nr: {self.measurement_nr} 💾📉✅️" 
         self.save_plot_btn.disabled = True
         print(f"Image saved to: {fname}")
@@ -812,9 +960,9 @@ class TrajectoryScreen(Screen):
         """Save the frames to a file."""
         self.setup.settings.loc['POWER(uW)', 'value'] = round(self.power, 2)
         write_settings(self.save_path, self.setup.settings)
-        path_file = self.save_path + '\\' + FILTERS[self.filter_id] + '_' + '_P_' + str(self.power) 
+        dir_path = self.save_path + '\\' + FILTERS[self.filter_id] + '_' + '_P_' + str(self.power) 
         for n, frame in enumerate(frames):
-            path_file += 'uW_frame_' + str(n).zfill(3) +'.tif'
+            path_file = dir_path + 'uW_frame_' + str(n).zfill(3) +'.tif'
             io.imsave(path_file, frame)
         
         self.save_img_btn.text = f"Images saved! Measurement nr: {self.measurement_nr} 💾📸✅️" 
