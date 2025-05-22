@@ -38,13 +38,8 @@ from microscope_control.saving import *
 from microscope_control.SetupSettings import write_settings
 from microscope_control.Constants import *
 from .main import Setup  # your actual Setup class
-<<<<<<< Updated upstream
-
-from microscope_control.screen_roi_selection import ROI_selection_screen, draw_roi
-=======
 from .autofocus_whitelight import autofocus_whitelight
 from microscope_control.screen_roi_selection import ROI_selection_screen, draw_roi, get_cutoff
->>>>>>> Stashed changes
 
 # # 1) Create a shared context:
 # FCM.create('emoji_greek')
@@ -196,10 +191,10 @@ class MainScreen(Screen, PopupMixin):
                                 size=(600, 200),              # Adjust size of grid manually
                                 pos_hint={"center_x": 0.5, "top": 0.9})
         
-        self.button_layout = GridLayout(cols=2, padding=10, spacing=10,
+        self.button_layout = GridLayout(cols=3, padding=10, spacing=10,
                                         size_hint=(None, None),
                                         size=(400, 300),              # Adjust size of grid manually
-                                        pos_hint={"center_x": 0.5, "center_y": 0.5})
+                                        pos_hint={"center_x": 0.35, "center_y": 0.4})
         self._init_labels()
         self._init_buttons()
         self.layout.add_widget(self.status_layout)
@@ -232,9 +227,10 @@ class MainScreen(Screen, PopupMixin):
     def _init_buttons(self):
         self._add_button('Take Spectra 🎨📊', self.manage_spectra)
         self._add_button('Time Trajectories ⏱️📉', self.manage_time_evolution)
-        self._add_button('Take Image 📸', self.manage_take_image)
         self._add_button('Power ramp 🔌', self.setup.power_ramp)
+        self._add_button('Take Image 📸', self.manage_take_image)
         self._add_button('Live Camera 🎥', self.manage_live_cam)
+        self._add_button('Autofocus 🔍', self.call_autofocus)
         self._add_button('Set Sample name 🧫', self.set_sample_name)
         self._add_button('Set ROI 🎯', self.manage_ROI)
         self._add_button('Set Filter 🚥', self.choose_filter)
@@ -384,6 +380,14 @@ class MainScreen(Screen, PopupMixin):
     def choose_filter(self, *_): 
         self.filter_chosen = True
         pass
+
+    def call_autofocus(self, *_):
+        if self.manager.has_screen('autofocus'):
+            self.manager.remove_widget(self.manager.get_screen('autofocus'))
+
+        autofoc = autofocus_whitelight(name='autofocus', setup=self.setup)
+        self.manager.add_widget(autofoc)
+        self.manager.current = 'autofocus'
 
     @combo_popup(
         title="Set Sample",
