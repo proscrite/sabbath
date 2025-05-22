@@ -46,16 +46,17 @@ class Setup:
         # self.motor = apt.Motor(26002227)
         self.motor = KinesisMotor("26002227", scale=2184533.33) # scale is in mm/step
         self.arduino = serial.Serial("COM6", 9600, timeout=1) # Open serial port to arduino
-        self.fraction_power = 1.0
+        self.fraction_power = 1.0  # Fraction of maximum power attenuated by the ND filter wheel
+        self.power_factor = 4.0    # Factor to compensate for the losses in the beam splitter
         self.max_power = self.get_power()
         self.position_max = 0.0
         self.shutter_status = False
-        self.open_all_devices()
-        self.filter_id = self.wheel.get_filter()
         self.texp = 0.5
         self.roi = [0, 2048, 0, 2048]  # Default ROI for the whole image
+        self.open_all_devices()
+        self.filter_id = self.wheel.get_filter()
 
-        self.cam.set_exposure(0.5)   # Set default exposure time to 0.5s
+        self.cam.set_exposure(self.texp)   # Set default exposure time to 0.5s
         
         self.menu = \
             {
@@ -120,14 +121,13 @@ class Setup:
             self.cam.close()
             time.sleep(2)
         import live_cam
-        # import threading
-        self.open_shutter()
+        
         live_cam.dcam_live_capturing()
         print('Returned from live_cam')
         del(live_cam)
-        self.close_shutter()
+        
         self.cam.open()
-        self.cam.set_exposure(0.5)
+        self.cam.set_exposure(self.texp)
         # th = threading.Thread(target=live_cam.dcamtest_thread_live)
 
     def take_images(self, name, filters):
@@ -196,6 +196,7 @@ class Setup:
         if self.meter.open(1):
             current_power = round(self.meter.read(), 7)   # Need high precision for low power reading
         self.meter.close()
+        current_power = current_power * self.power_factor
         return current_power
 
     def select_filter(self):
@@ -367,7 +368,7 @@ class Setup:
 
     def open_cam(self):
         self.cam.open()
-        self.cam.set_exposure(0.5)
+        self.cam.set_exposure(self.texp)
         while True:
             if not self.cam.is_opened():
                 if get_yes_no('Camera failed opening. Try again? y/n\n') is False:
@@ -401,8 +402,7 @@ class Setup:
     def take_spectra(self):
         name = get_sample_name()
         filters = 0
-        texp = 0.50
-        self.cam.set_exposure(texp)   # Set exposure to spectra taking value
+        
         self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
     
         question = 'Sample:\t' + name + '\nAll filters\n'
@@ -417,8 +417,7 @@ class Setup:
             print('Calling analyse_spectrum for path: ', path_sample) 
             # analyse_spectrum(path_sample)
 
-            self.cam.set_exposure(0.5)   # After saving, reset exposure to default value
-            self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', 0.5)
+            self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
         else:
             pass
 

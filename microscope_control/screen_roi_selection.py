@@ -7,6 +7,10 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 
+def get_cutoff(img, threshold=8):
+        n, bins = np.histogram(img.flatten(), bins=int(img.shape[0]/2) )
+        cbins = (bins[:-1] + bins[1:]) / 2
+        return cbins[n>threshold].max()
 
 def draw_roi(ax, roi):
     # Draw a rectangle on the image based on the ROI coordinates
