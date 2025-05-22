@@ -532,6 +532,7 @@ class Setup:
 
     def set_exposure(self, texp):
         self.cam.set_exposure(texp)
+        self.texp = texp
         self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
         print('Exposure time set to %0.2f s' %texp)
 
@@ -579,7 +580,13 @@ class Setup:
         print('New Z position: ', round(self.motor.get_position(), 3))
         self.settings = SetupSettings.add_settings_value(self.settings, 'ZPOS(mm)', new_zpos)
         
-    
+    def move_zpos_step(self, step=None):
+        """Move Z position to new value"""
+        self.motor.move_by(step)
+        self.motor.wait_move()
+        print('New Z position: ', round(self.motor.get_position(), 3))
+        self.settings = SetupSettings.add_settings_value(self.settings, 'ZPOS(mm)', self.motor.get_position())
+
     def init_settings(self):
         fin = SetupSettings.find_recent_settings()
         print('Loading recent settings at :', fin)
