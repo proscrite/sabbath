@@ -21,7 +21,8 @@ from ast import literal_eval
 # import Meter
 # import saving
 # #matplotlib.interactive(True)
-sys.path.append(r'G:\My Drive\Ba Tagging\code\imag_analisis')
+# sys.path.append(r'G:\My Drive\Ba Tagging\code\imag_analisis')
+sys.path.append(r'C:\Users\owner\Documents\sabbath\imag_analysis')
 
 from image_processing import find_fov
 

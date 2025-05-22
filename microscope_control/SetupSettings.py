@@ -4,7 +4,7 @@ from datetime import datetime
 import os
 from glob import glob
 
-PATH_DATA_SETS = r"G:/My Drive/Ba Tagging/data/img/"
+ROOT_SAVE_LOCATION = "C:\\Users\\owner\\Documents\\offline_data\\img\\"
 SETUP_NAME = "Barium-Tagging"
 OPERATOR = "Pablo Herrero"
 EXCITATION_FILTER = "Center-527nm_Width-22nm",
@@ -134,8 +134,8 @@ def add_settings_value(df_setting, setting, value):
     return df_setting
     
 def find_recent_settings():
-    finds = glob(PATH_DATA_SETS+'**/**/**/**/settings.json')
-    dirs = [f[:len(PATH_DATA_SETS)+13] for f in finds]
+    finds = glob(ROOT_SAVE_LOCATION+'**/**/**/**/settings.json')
+    dirs = [f[:len(ROOT_SAVE_LOCATION)+13] for f in finds]
     datestr = [os.path.split(d)[1] for d in dirs]
     dates = [datetime.strptime(dstr, "%d-%m-%y") for dstr in datestr]
     dir_recent = datetime.strftime(max(dates), "%d-%m-%y")

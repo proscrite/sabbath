@@ -2,7 +2,8 @@
 from ctypes import *
 
 #region import dll functions
-FWxCLib = cdll.LoadLibrary("G:\\My Drive\\Ba Tagging\\code\\microscope_control\\FilterWheel102_win64.dll")
+# FWxCLib = cdll.LoadLibrary("G:\\My Drive\\Ba Tagging\\code\\microscope_control\\FilterWheel102_win64.dll")
+FWxCLib = cdll.LoadLibrary("C:\\Users\\owner\\Documents\\sabbath\\microscope_control\\FilterWheel102_win64.dll")
 
 """common command
 """

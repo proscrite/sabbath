@@ -10,8 +10,8 @@ from skimage.draw import disk
 
 from skimage.filters import threshold_otsu, threshold_li, threshold_yen
 
-ROOT_DIR = 'G:\\My Drive\\Ba Tagging\\'
-FILTER_PATH = ROOT_DIR +'\\code\\imag_analisis\\filter_stats.csv'
+ROOT_DIR = 'C:\\Users\\owner\\Documents\\sabbath'
+FILTER_PATH = ROOT_DIR +'\\imag_analysis\\filter_stats.csv'
 filtQE = pd.read_csv(FILTER_PATH).mean_qe
 
 def fov_threshold(img, method = ['otsu', 'li', 'yen']):

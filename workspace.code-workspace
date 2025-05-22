@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"name": "sabbath",
+			"path": "."
+		}
+	],
+	"settings": {
+		"workbench.settings.useSplitJSON": true,
+		"terminal.integrated.cwd": "C:\\Users\\owner\\Documents\\sabbath"
+	},
+	"launch": {
+		"version": "0.2.0",
+		"configurations": []
+	}
+}

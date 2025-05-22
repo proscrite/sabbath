@@ -1,4 +1,4 @@
-AUTHOR = 'Nir Kapon'
+AUTHOR = 'Pablo Herrero'
 
 # FILTERS = \
 #     {
@@ -82,13 +82,15 @@ Starting_position = 1
 MIN_TIME_OUT = 0.6              # seconds
 TIME_FORMAT = "%d-%m-%y_%H-%M-%S"
 TIME_FORMAT_TODAY = '%d-%m-%y'
-IMAGE_SET_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\sets\\"
-IMAGE_SINGLE_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\sing\\"
-IMAGE_TIMERUN_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\time\\"
-IMAGE_POWER_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\img\\ramp\\"
 
-ROOT_DIR = r'G:\My Drive\Ba Tagging'
-FILTER_PATH = ROOT_DIR +r'\code\imag_analisis\filter_stats.csv'
+ROOT_SAVE_LOCATION = "C:\\Users\\owner\\Documents\\offline_data\\img\\"
+IMAGE_SET_SAVE_LOCATION = ROOT_SAVE_LOCATION + "sets\\"
+IMAGE_SINGLE_SAVE_LOCATION = ROOT_SAVE_LOCATION + "sing\\"
+IMAGE_TIMERUN_SAVE_LOCATION = ROOT_SAVE_LOCATION + "time\\"
+IMAGE_POWER_SAVE_LOCATION = ROOT_SAVE_LOCATION + "ramp\\"
+
+ROOT_DIR = 'C:\\Users\\owner\\Documents\\sabbath'
+FILTER_PATH = ROOT_DIR +'\\imag_analysis\\filter_stats.csv'
 NP_SAVE_LOCATION = "G:\\My Drive\\Ba Tagging\\data\\numpy\\"
 EXIFTOOL_APP = "G:\\My Drive\\Ba Tagging\\code\\microscope_control\\exiftool.exe"
 EXIFTOOL_OK_STRING = "1 image files updated"
@@ -98,15 +100,14 @@ EXIFTOOL_OK_STRING = "1 image files updated"
 SAMPLES = \
     {
         0:  'other',
-        1:  'RuSL',
-        2:  'quartz',
-        3:  'Bromobimane_Acetonitrile',
-        4:  'Bromobimane_H2O',
-        5:  'FS6_Bromob_1e-6',
-        6:  'IPG-4 1 µM',
-        7:  'Rhodamine-B 50 µM 270225',
-        8:  'Rhodamine-B 5 µM 270225',
-        9:  'Rhodamine-B 0.5 µM 270225',
+        1:  'quartz',
+        2:  'IPG-4 1 µM',
+        3:  'Rhodamine-B 50 µM 270225',
+        4:  'Rhodamine-B 1 µM 140525',
+        5:  'Rhodamine-B 500 nM 140525',
+        6:  'Rhodamine-B 100 nM 140525',
+        7:  'Rhodamine-B 50 nM 140525',
+        8:  'Rhodamine-B 10 nM 140525',
         'q': 'quit',
     }
 

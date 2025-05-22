@@ -56,36 +56,39 @@ def save_npy(data, name):
     return num
 
 
+TIME_FORMAT_TODAY = '%d-%m-%y'
+import time
 def check_path_save(rootpath, name, filters=None):
     today = time.strftime(TIME_FORMAT_TODAY)
-    path = rootpath + today + '\\' + name
+    path_date_sample = rootpath + today + '\\' + name
 
     try:
-        nsets = sorted(next(os.walk(path))[1])
+        nsets = sorted(next(os.walk(path_date_sample))[1])
     except StopIteration:
-        if not os.path.exists(path): os.makedirs(path)
-        nsets = sorted(next(os.walk(path))[1])
+        if not os.path.exists(path_date_sample): os.makedirs(path_date_sample)
+        nsets = sorted(next(os.walk(path_date_sample))[1])
 
+    # print('Number of sets: ', len(nsets))
+    # print('Nsets: ', nsets)
+    # print('Last set number: ', nsets[-1])
+    # print('Last set: ', nsets[-1].split('-')[0])
+    # print('Path: ', path_date_sample)
    ####### Check number of existing measurements in directory
     try: 
-        last_set = int(nsets[-1])
-        # print('Number of sets: ', len(nsets))
-        # print('Nsets: ', nsets)
-        # print('Last set number: ', nsets[-1])
-        # print('Last set: ', last_set)
-        # print('Path: ', path)
+        last_set = int(nsets[-1].split('-')[0])
     except IndexError: last_set = 0
    ####### Set current measurement as last_set + 1 (previously 'num')
-    path += '\\' + str(last_set+1).zfill(2)
+    path_date_sample += '\\' + str(last_set+1).zfill(2)
 
-   ######  For time and ramp measurements, add the filter number to the path. Ex: /sample/3-f7-575nm/
+   ######  For time and ramp measurements, add the filter number to the path. Ex: /sample/03-f7-575nm/
     if filters is not None:
-        path += '-filt' + str(filters) + str(FILTERS[filters].split('_')[0][6:])
+        path_date_sample += '-filt' + str(filters) + str(FILTERS[filters].split('_')[0][6:])
 
-    if not os.path.exists(path):
-        os.makedirs(path)
-    return path
+    if not os.path.exists(path_date_sample):
+        os.makedirs(path_date_sample)
+    return path_date_sample
 
+check_path_save(ROOT_DIR + 'time\\', 'Rhodamine-B 500 nM 140525', filters=7)
 
 def single_tif_save(data, path, name, power, filters):
     
