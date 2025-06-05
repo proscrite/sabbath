@@ -325,7 +325,6 @@ class MainScreen(Screen, PopupMixin):
 
 ### ========== Single image Screen ==========
 
-
 class ImageScreen(Screen):
     def __init__(self, sample_name, **kwargs):
         super().__init__(**kwargs)
@@ -379,6 +378,69 @@ class ImageScreen(Screen):
         
         self.save_btn.text = f"Image saved! 💾✅️"
         print(f"Image saved to: {save_path}")
+
+
+### ========== Camera settings Screen ==========
+
+class CameraSettingsScreen(Screen, PopupMixin):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # self.setup = Setup()
+        root = BoxLayout(orientation='vertical')
+        root.add_widget(Widget(size_hint_y=1))      # Spacer to push content down
+
+        layout = GridLayout(cols=2, spacing=10, padding=10, size_hint_y=None)
+        layout.bind(minimum_height=layout.setter('height'))
+
+        current_exposure = 0.5
+        current_speed = 'fast'
+        current_binning = 1
+        current_image_size = 2048
+
+        self.button_speed = Button(text=f"Speed: {current_speed}", size_hint=(1, None), height=50)
+        self.button_speed.bind(on_press=self.set_readout_speed)
+        layout.add_widget(self.button_speed)
+
+        self.button_exposure = Button(text=f"Exposure: {current_exposure} s", size_hint=(1, None), height=50)
+        self.button_exposure.bind(on_press=self.manage_exposure)
+        layout.add_widget(self.button_exposure)
+
+        self.button_binning = Button(text=f"Binning: {current_binning}", size_hint=(1, None), height=50)
+        self.button_binning.bind(on_press=self.set_binning)
+        layout.add_widget(self.button_binning)
+    
+        self.button_image_size = Button(text=f"Image Size: {current_image_size}", size_hint=(1, None), height=50)
+        layout.add_widget(self.button_image_size)
+
+        root.add_widget(layout)
+        root.add_widget(Widget(size_hint_y=1))      # Spacer to push content down
+        self.add_widget(root)
+
+    def manage_exposure(self, instance):
+        # self.setup.manage_exposure()
+        print("Managing exposure...")
+
+    @choice_popup(
+        title="Choose Speed",
+        get_current=lambda self: f"Current Speed: {self.button_speed.text}",
+        choices=[("Fast", "fast"), ("Slow", "slow")],
+        on_success=lambda self, v: setattr(self.button_speed, 'text', f"Speed: {v}"),
+        flag_popup='Readout Speed'
+    )
+    def set_readout_speed(self, *_):
+        pass
+
+    @choice_popup(
+        title="Choose Binning",
+        get_current=lambda self: f"Current Binning: {self.button_binning.text}",
+        choices=[('1', 1), ('2', 2), ('4', 4)],
+        on_success=lambda self, v: ( setattr(self.button_binning, 'text', f"Binning: {v}"),
+                                    setattr(self.button_image_size, 'text', f"Image Size: {2048 // v}")),
+        flag_popup='Binning'
+    )
+    def set_binning(self, *_):
+        pass
+
 
 ### ========== App ==========
 
