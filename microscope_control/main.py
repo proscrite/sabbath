@@ -58,6 +58,7 @@ class Setup:
 
         self.cam.set_exposure(self.texp)   # Set default exposure time to 0.5s
         self.cam.set_readout_speed('fast')   # Set default readout speed to fast
+        self.cam.set_attribute_value('binning', 1)  # Set default binning to 1
         
         self.menu = \
             {
@@ -558,6 +559,24 @@ class Setup:
         self.cam.set_readout_speed(ro_speed)
         self.settings = SetupSettings.add_settings_value(self.settings, 'READOUT_SPEED', ro_speed)
 
+    def get_binning(self):
+        """Prompt user for binning"""
+        current_binning = self.cam.get_attribute_value('binning')
+        print('Current binning: ', current_binning)
+
+        binning_dict = {'1': 1, '2': 2, '4': 4}
+        bin_key = input(f'Enter readout speed: {binning_dict}\n')
+        if bin_key not in binning_dict.keys():
+            print('Invalid readout speed, setting to fast')
+            sel_binning = 1
+        else:
+            sel_binning = binning_dict[bin_key]
+            self.set_binning(sel_binning)
+
+    def set_binning(self, sel_binning):
+        """Set readout speed (slow or fast)"""
+        self.cam.set_attribute_value('binning', sel_binning)
+        self.settings = SetupSettings.add_settings_value(self.settings, 'BINNING', sel_binning)
 
     def show_prop_camera(self):
         if self.cam.is_opened() is False:
