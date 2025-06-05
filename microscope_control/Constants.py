@@ -104,10 +104,11 @@ SAMPLES = \
         2:  'IPG-4 1 µM',
         3:  'Rhodamine-B 50 µM 270225',
         4:  'Rhodamine-B 1 µM 140525',
-        5:  'Rhodamine-B 500 nM 140525',
-        6:  'Rhodamine-B 100 nM 140525',
-        7:  'Rhodamine-B 50 nM 140525',
-        8:  'Rhodamine-B 10 nM 140525',
+        5:  'Rhodamine-B 100 nM 140525',
+        6:  'Rhodamine-B 10 nM 050625',
+        7:  'Rhodamine-B 1 nM 050625',
+        8:  'Rhodamine-B 100 pM 050625',
+        9:  'Rhodamine-B 10 pM 050625',
         'q': 'quit',
     }
 

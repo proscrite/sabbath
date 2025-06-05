@@ -57,6 +57,7 @@ class Setup:
         self.filter_id = self.wheel.get_filter()
 
         self.cam.set_exposure(self.texp)   # Set default exposure time to 0.5s
+        self.cam.set_readout_speed('fast')   # Set default readout speed to fast
         
         self.menu = \
             {
@@ -70,6 +71,7 @@ class Setup:
             's': (self.toggle_shutter, 'Shutter (open/close)'),
             't': (self.take_sequence, 'Take time evolution'),
             'e': (self.get_exposure, 'Set camera exposure'),
+            'v': (self.get_readout_speed, 'Get readout speed'),
             'p': (self.print_power, 'Get power reading'),
             'n': (self.attenuate_power, 'Set power attenuation'),
             'N': (self.maximum_power, 'Set power to maximum'),
@@ -535,6 +537,27 @@ class Setup:
         self.texp = texp
         self.settings = SetupSettings.add_settings_value(self.settings, 'EXPOSURE_TIME', texp)
         print('Exposure time set to %0.2f s' %texp)
+
+    def get_readout_speed(self):
+        """Prompt user for readout speed"""
+        ro_speed = self.cam.get_readout_speed()
+        print('Readout speed: ', ro_speed)
+
+        """Set readout speed"""
+        speed_dict = {'1': 'slow', '2': 'fast'}
+        ro_speed_key = input(f'Enter readout speed: {speed_dict}\n')
+        if ro_speed_key not in speed_dict.keys():
+            print('Invalid readout speed, setting to fast')
+            ro_speed = 'fast'
+        else:
+            ro_speed = speed_dict[ro_speed_key]
+            self.set_readout_speed(ro_speed)
+
+    def set_readout_speed(self, ro_speed):
+        """Set readout speed (slow or fast)"""
+        self.cam.set_readout_speed(ro_speed)
+        self.settings = SetupSettings.add_settings_value(self.settings, 'READOUT_SPEED', ro_speed)
+
 
     def show_prop_camera(self):
         if self.cam.is_opened() is False:
