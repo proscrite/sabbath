@@ -62,6 +62,12 @@ class autofocus_whitelight(Screen):
         content.add_widget(btn_yes)
         content.add_widget(btn_no)
 
+        # Row 3: Skip coarse and go fine
+        content.add_widget(Label(text="Skip coarse and go to fine?"))
+        btn_fine = Button(text="Fine Only ➡️", font_name='EmojiFont', size_hint_y=None, height=50)
+        btn_fine.bind(on_press=self.skip_to_fine)
+        content.add_widget(btn_fine)
+
         self.popup = Popup(
             title="Autofocus Confirmation",
             content=content,
@@ -69,6 +75,23 @@ class autofocus_whitelight(Screen):
             auto_dismiss=False
         )
         self.popup.open()
+
+
+    def skip_to_fine(self, *_):
+        """Dismiss popup and immediately start fine autofocus."""
+        self.popup.dismiss()
+        # ensure no coarse data lingering
+        self.zpos_coarse = []
+        self.kurt_coarse = []
+        # directly initiate fine pass around current motor position
+        self.call_autofocus_pass(
+            nsteps=20, step=-0.01,
+            z_list_attr='zpos_fine',
+            metric_list_attr='kurt_fine',
+            ax=self.ax[1],
+            title="Fine Autofocus Metric"
+        )
+
 
     def cancel_autofocus(self, *_):
         """Abort any running autofocus and return to main screen."""
@@ -97,12 +120,13 @@ class autofocus_whitelight(Screen):
         # disable to prevent re-entry
         self.continue_btn.disabled = True
         # return to coarse best plane
-        best = self.zpos_coarse[np.argmax(self.kurt_coarse)]
-        self.setup.motor.move_to(best)
-        self.setup.motor.wait_move()
-        # step back one coarse step so fine scan straddles focus
-        self.setup.motor.move_by(+0.1)
-        self.setup.motor.wait_move()
+        if hasattr(self, 'zpos_coarse') and self.zpos_coarse:
+            best = self.zpos_coarse[np.argmax(self.kurt_coarse)]
+            self.setup.motor.move_to(best)
+            self.setup.motor.wait_move()
+            # step back one coarse step so fine scan straddles focus
+            self.setup.motor.move_by(+0.1)
+            self.setup.motor.wait_move()
 
         self.call_autofocus_pass(
             nsteps=20, step=-0.01,
@@ -181,9 +205,25 @@ class autofocus_whitelight(Screen):
             self.continue_btn.bind(on_press=self.closing_popup)
             self.continue_btn.disabled = False
         else:
-            # enable continue button for fine
             self.continue_btn.disabled = False
+            self._countdown = 5
+            self.continue_btn.text = f"Continue to Fine Focus ✔️ ({self._countdown}s)"
+            # schedule countdown every second
+            self._countdown_event = Clock.schedule_interval(self._auto_continue_countdown, 1)
 
+    def _auto_continue_countdown(self, dt):
+        self._countdown -= 1
+        if self.abort:
+            return False
+        if self._countdown > 0:
+            self.continue_btn.text = f"Continue to Fine Focus ✔️ ({self._countdown}s)"
+            return True  # continue countdown
+        # countdown finished: unschedule and trigger fine autofocus
+        self.continue_btn.text = "Continue to Fine Focus ✔️"
+        self._countdown_event.cancel()
+        self.call_autofocus_fine()
+        return False
+    
     def closing_popup(self, *_):
         content = GridLayout(cols=2, rows=2)
         content.add_widget(Label(text="Have you switched OFF white light illumination?"))
