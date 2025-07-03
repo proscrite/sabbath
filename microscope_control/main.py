@@ -46,8 +46,9 @@ class Setup:
         # self.motor = apt.Motor(26002227)
         self.motor = KinesisMotor("26002227", scale=2184533.33) # scale is in mm/step
         self.arduino = serial.Serial("COM6", 9600, timeout=1) # Open serial port to arduino
+        
         self.fraction_power = 1.0  # Fraction of maximum power attenuated by the ND filter wheel
-        self.power_factor = 4.0    # Factor to compensate for the losses in the beam splitter
+        self.power_correction_factor = 10.0    # Factor to compensate for the losses in the beam splitter
         self.max_power = self.get_power()
         self.position_max = 0.0
         self.shutter_status = False
@@ -75,7 +76,7 @@ class Setup:
             'v': (self.get_readout_speed, 'Get readout speed'),
             'p': (self.print_power, 'Get power reading'),
             'n': (self.attenuate_power, 'Set power attenuation'),
-            'N': (self.maximum_power, 'Set power to maximum'),
+            'N': (self.set_maximum_power, 'Set power to maximum'),
             'r': (self.power_ramp, 'Power ramps'),
             'R': (self.select_ROI, 'Select ROI'),
             ',': (self.settings_menu, 'Settings menu'),
@@ -195,11 +196,16 @@ class Setup:
         self.send_ttl('L') 
         self.shutter_status = False
 
-    def get_power(self):
+    def get_raw_power(self):
         if self.meter.open(1):
             current_power = round(self.meter.read(), 7)   # Need high precision for low power reading
         self.meter.close()
-        current_power = current_power * self.power_factor
+        return current_power
+     
+    def get_power(self):
+        """Get the current power reading from the meter"""
+        current_power = self.get_raw_power()
+        current_power = current_power * self.power_correction_factor
         return current_power
 
     def select_filter(self):
@@ -221,7 +227,8 @@ class Setup:
         self.meter.close()
         return current_power
 
-    def attenuate_power(self):
+    def get_attenuation_factor(self):
+        """Prompt user for the attenuation factor (CLI user input)"""
         new_fraction_power = input('Enter the power fraction (0 to 1) \nor order of magnitude (-1 to -4): ')
         try:
             new_fraction_power = float(new_fraction_power)
@@ -230,7 +237,15 @@ class Setup:
         """Set the power to a percentage of the maximum power"""
         if new_fraction_power > 1.0:
             raise ValueError("Percentage must be between 0 and 1")
-        
+        self.fraction_power = new_fraction_power
+        self.attenuate_power(new_fraction_power)
+
+    def attenuate_power(self, new_fraction_power):
+        """Attenuate the power to a fraction of the maximum power, according to exponential decay
+           Parameters:
+               new_fraction_power (float): The new fraction of power to set (0 to 1)
+        """
+
         exp_parameter = 0.01685    # Exponential decay parameter for the power ramp (conversion factor from desired power to angle)
         if new_fraction_power > self.fraction_power:
             # Attenuate power to a fraction of the maximum power, according to exponential decay
@@ -261,14 +276,14 @@ class Setup:
         # response = self.arduino.readline().decode().strip()
         # print("Arduino says:", response)
         time.sleep(3)
-
+ 
         current_power = self.get_power()
         print(f'Power: {current_power*1e6} μW')
         self.fraction_power = new_fraction_power
-        self.check_power_scale()
+        # self.check_overflow()
 
-    def check_power_scale(self):
-        """Check the power scale and set the power to maximum if needed"""
+    def check_overflow(self):
+        """Check for overflow conditions and handle them"""
         current_power = self.get_power()
         if current_power > self.max_power:
             input(f"Found power: {current_power*1e6} μW, setting to maximum power. Press any key to continue")
@@ -277,7 +292,7 @@ class Setup:
             self.max_power = current_power
             self.settings = SetupSettings.add_settings_value(self.settings, 'POWER(uW)', current_power*1e6)
 
-    def maximum_power(self):
+    def set_maximum_power(self):
         """Set the power to maximum"""
         steps = np.linspace(0, 1600, 10)
         powers = []
@@ -288,7 +303,7 @@ class Setup:
             command = f'{int(steps[1])}\n'    # Fixed step, pass to arduino as int
             # print(f'Command: {command}')
             self.arduino.write(command.encode())  # Send command to Arduino
-            time.sleep(3)
+            time.sleep(2) 
             power = self.get_power()
             powers.append(power)
             # print(f'Step: {i}, position: {s}, Power: {round(power * 1e6, 4)} uW')
@@ -311,7 +326,7 @@ class Setup:
         response = self.arduino.readline().decode().strip()
         print("Arduino says:", response)
         time.sleep(1)
-        self.send_ttl('L')
+        # self.send_ttl('L')
 
     def power_ramp(self):
         """Power ramp"""

@@ -324,8 +324,12 @@ class MainScreen(Screen, PopupMixin):
         print("Power label printed...")
 
     def manage_power(self):
-        # self.setup.manage_power()
-        print("Managing power...")
+        if self.manager.has_screen('power_management'):
+            self.manager.remove_widget(self.manager.get_screen('power_management'))
+
+        power_manage = PowerManagement(name='power_management')
+        self.manager.add_widget(power_manage)
+        self.manager.current = 'power_management'
 
     def manage_toggle_shutter(self):
         # self.setup.manage_toggle_shutter()
@@ -408,36 +412,48 @@ class CameraSettingsScreen(Screen, PopupMixin):
         layout = GridLayout(cols=2, spacing=10, padding=10, size_hint_y=None)
         layout.bind(minimum_height=layout.setter('height'))
 
-        current_exposure = 0.5
-        current_speed = 'fast'
-        current_binning = 1
-        current_image_size = 2048
+        self.current_exposure = 0.5
+        self.current_speed = 'fast'
+        self.current_binning = 1
+        self.current_image_size = 2048
+        self._add_buttons(layout)
+        
+        root.add_widget(layout)
+        root.add_widget(Widget(size_hint_y=1))      # Spacer to push content down
+        self.add_widget(root)
 
-        self.button_speed = Button(text=f"Speed: {current_speed}", size_hint=(1, None), height=50)
+    def _add_buttons(self, layout):
+        # Add buttons for camera settings
+        self.button_speed = Button(text=f"Speed: {self.current_speed}", size_hint=(1, None), height=50)
         self.button_speed.bind(on_press=self.set_readout_speed)
         layout.add_widget(self.button_speed)
 
-        self.button_exposure = Button(text=f"Exposure: {current_exposure} s", size_hint=(1, None), height=50)
+        self.button_exposure = Button(text=f"Exposure: {self.current_exposure} s", size_hint=(1, None), height=50)
         self.button_exposure.bind(on_press=self.manage_exposure)
         layout.add_widget(self.button_exposure)
 
-        self.button_binning = Button(text=f"Binning: {current_binning}", size_hint=(1, None), height=50)
+        self.button_binning = Button(text=f"Binning: {self.current_binning}", size_hint=(1, None), height=50)
         self.button_binning.bind(on_press=self.set_binning)
         layout.add_widget(self.button_binning)
-    
-        self.button_image_size = Button(text=f"Image Size: {current_image_size}", size_hint=(1, None), height=50)
+
+        self.button_image_size = Button(text=f"Image Size: {self.current_image_size}", size_hint=(1, None), height=50)
         layout.add_widget(self.button_image_size)
 
         layout.add_widget(Button(text = "Go Back", size_hint=(1, None), height=50,
             on_release=self.go_back, font_name='EmojiFont'))
 
-        root.add_widget(layout)
-        root.add_widget(Widget(size_hint_y=1))      # Spacer to push content down
-        self.add_widget(root)
+    @text_popup(
+        title="Set Exposure",
+        hint="Seconds",
+        get_current=lambda self: f"Current Exposure: {self.current_exposure:.2f}s",
+        validate=float,
+        on_success=lambda self, t: (
+            # self.setup.set_exposure(t),
+            setattr(self.button_exposure, 'text', f"Exposure: {t:.2f}s")
+        )
+    )
+    def manage_exposure(self): pass
 
-    def manage_exposure(self, instance):
-        # self.setup.manage_exposure()
-        print("Managing exposure...")
 
     @choice_popup(
         title="Choose Speed",
@@ -475,7 +491,8 @@ class AutofocusWhitelightMock(Screen):
 
         # Build UI
         root = BoxLayout(orientation='vertical')
-        self.fig, self.ax = plt.subplots(1, 2, figsize=(10, 4), dpi=100, sharey=True)
+        self.fig, self.ax = plt.subplots(1, 2, figsize=(12, 4), dpi=100, constrained_layout=True)
+
         self.mlp_canvas = FigureCanvasKivyAgg(self.fig)
         self.mlp_canvas.opacity = 0.0
         root.add_widget(self.mlp_canvas)
@@ -568,8 +585,11 @@ class AutofocusWhitelightMock(Screen):
         )
 
     def call_autofocus_pass(self, nsteps, step, z_list_attr, metric_list_attr, ax, title):
+        self.autofocus_finished = False  # Reset at the start of each pass
         setattr(self, z_list_attr, [])
         setattr(self, metric_list_attr, [])
+        if z_list_attr == 'zpos_fine':
+            self.images_fine = []
         self.current_ax = ax
         setattr(self, 'nsteps', nsteps)
         setattr(self, 'step', step)
@@ -579,16 +599,15 @@ class AutofocusWhitelightMock(Screen):
             args=(nsteps, step, z_list_attr, metric_list_attr, ax, title),
             daemon=True
         ).start()
-
+    
     def _loop_autofocus(self, nsteps, step, z_attr, k_attr, ax, title):
         img0 = np.random.normal(100, 10, (256, 256)).astype('float64')
         zpos = self.init_zpos
         for i in range(nsteps):
             if self.abort:
                 break
-            # Simulate a focus curve: kurtosis peaks in the middle
             img = img0 + np.random.normal(0, 5, (256, 256))
-            # Add a synthetic focus effect
+            time.sleep(0.1)  # Simulate delay for image acquisition
             focus_factor = np.exp(-((i - nsteps//2)/5)**2)
             img += focus_factor * np.random.normal(50, 10, (256, 256))
             img_bg = img - img0
@@ -596,18 +615,40 @@ class AutofocusWhitelightMock(Screen):
             k = kurtosis(img_bg.flatten(), fisher=True, bias=False)
             getattr(self, z_attr).append(z)
             getattr(self, k_attr).append(k)
-            Clock.schedule_once(lambda dt, z=z, k=k: self._update_plot(z, k, ax, title))
+            if z_attr == 'zpos_fine':
+                self.images_fine.append(img_bg.copy())
+                # For fine: update kurtosis on ax[1], image on ax[0]
+                Clock.schedule_once(lambda dt, z=z, k=k, img=img_bg: self._update_plot(z, k, fine=True, img=img))
+            else:
+                # For coarse: update kurtosis on ax[0], no image
+                Clock.schedule_once(lambda dt, z=z, k=k: self._update_plot(z, k, fine=False))
         Clock.schedule_once(lambda dt: self._finish_pass(z_attr, k_attr), 0)
-
-    def _update_plot(self, z, k, ax, title):
-        ax.clear()
-        zlist = getattr(self, 'zpos_' + title.split()[0].lower())
-        klist = getattr(self, 'kurt_' + title.split()[0].lower())
-        ax.plot(zlist, klist)
-        ax.set(title=title, xlabel="Z Position (mm)", ylabel="Kurtosis")
+    
+    def _update_plot(self, z, k, fine=False, img=None):
+        if getattr(self, 'autofocus_finished', False):
+            return
+        if fine:
+            # Fine: kurtosis on ax[1], image on ax[0]
+            self.ax[1].clear()
+            zlist = getattr(self, 'zpos_fine')
+            klist = getattr(self, 'kurt_fine')
+            self.ax[1].plot(zlist, klist, marker='o')
+            self.ax[1].set(title="Fine Autofocus Metric", xlabel="Z Position (mm)", ylabel="Kurtosis")
+            if img is not None:
+                self.ax[0].clear()
+                self.ax[0].imshow(img, cmap='gray')
+                self.ax[0].set_title(f"Live Fine Focus Image (z={z})")
+        else:
+            # Coarse: kurtosis on ax[0]
+            self.ax[0].clear()
+            zlist = getattr(self, 'zpos_coarse')
+            klist = getattr(self, 'kurt_coarse')
+            self.ax[0].plot(zlist, klist, marker='o')
+            self.ax[0].set(title="Coarse Autofocus Metric", xlabel="Z Position (mm)", ylabel="Kurtosis")
         self.mlp_canvas.draw()
 
     def _finish_pass(self, z_attr, k_attr):
+        self.autofocus_finished = True  # Prevent further updates
         zlist = getattr(self, z_attr)
         klist = getattr(self, k_attr)
         if not zlist:
@@ -618,6 +659,15 @@ class AutofocusWhitelightMock(Screen):
         # No hardware move in mock
 
         if z_attr == 'zpos_fine':
+            self.ax[0].clear()
+            self.ax[0].imshow(self.images_fine[best_i], )
+            self.ax[0].set_title(f"Best Fine Focus Image (z={best_z})")
+
+            self.ax[1].clear()
+            self.ax[1].plot(zlist, klist)
+            self.ax[1].set(title="Fine Autofocus Metric", xlabel="Z Position (mm)", ylabel="Kurtosis")
+            self.mlp_canvas.draw()
+
             self.continue_btn.text = 'Return to main menu'
             self.abort = True
             self.continue_btn.bind(on_press=self.closing_popup)
@@ -653,6 +703,105 @@ class AutofocusWhitelightMock(Screen):
             auto_dismiss=False
         )
         self.popup.open()
+
+class PowerManagement(Screen, PopupMixin):
+    """Mockup power management screen for prototyping UI without hardware."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # self.setup = Setup()
+        root = BoxLayout(orientation='vertical')
+        root.add_widget(Label(text="Power Management", font_size=24, size_hint_y=None, height=50))
+        root.add_widget(Widget(size_hint_y=1))      # Spacer to push content down
+
+        layout = GridLayout(cols=2, spacing=10, padding=10, size_hint_y=None)
+        layout.bind(minimum_height=layout.setter('height'))
+
+        self.attenuation = 1.0
+        self.correction_factor = 4.0
+        self.position_max_power = 0.0
+
+        self.read_power = 5  # Mock power reading
+        self.true_power = self.read_power * self.correction_factor
+
+        self._add_buttons(layout)
+
+        root.add_widget(layout)
+        root.add_widget(Widget(size_hint_y=1))      # Spacer to push content down
+        self.add_widget(root)
+
+    def _add_buttons(self, layout):
+
+        self.read_power_label = Label(text=f"🔎⚡️ Read Power: {self.read_power} uW", font_name='EmojiFont')
+        layout.add_widget(self.read_power_label)
+        self.true_power_label = Label(text=f"👌⚡️ True Power: {self.true_power} uW", font_name='EmojiFont')
+        layout.add_widget(self.true_power_label)
+        
+        layout.add_widget(Widget(size_hint_y=None, height=20))  # Spacer for layout balance
+        layout.add_widget(Widget(size_hint_y=None, height=20))  # Spacer for layout balance
+
+
+        self.button_correction_factor = Button(text=f"✍️ Correction factor: {self.correction_factor}", font_name='EmojiFont', size_hint=(1, None), height=50)
+        self.button_correction_factor.bind(on_press=self.set_correction_factor)
+        layout.add_widget(self.button_correction_factor)
+
+        self.button_attenuation = Button(text=f"🔈 Attenuation: {self.attenuation} %", font_name='EmojiFont', size_hint=(1, None), height=50)
+        self.button_attenuation.bind(on_press=self.set_attenuation)
+        layout.add_widget(self.button_attenuation)
+
+        self.button_max_power = Button(text=f"🔊🔋 Reset wheel to maximum Power", font_name='EmojiFont', size_hint=(1, None), height=50)
+        self.button_max_power.bind(on_press=self.set_max_power)
+        layout.add_widget(self.button_max_power)
+
+        self.button_position_max = Button(text=f"📌 Position Max Power: {self.position_max_power}", font_name='EmojiFont', size_hint=(1, None), height=50)
+        layout.add_widget(self.button_position_max)
+
+        layout.add_widget(Button(text = "🔙 Go Back", size_hint=(1, None), height=50,
+            on_release=self.go_back, font_name='EmojiFont'))
+
+    @text_popup(
+        title="Set power correction factor",
+        get_current=lambda self: f"✍️ Current Correction Factor: {self.button_correction_factor.text}",
+        hint="Correction factor (e.g. 4.0)",
+        validate=float,
+        on_success=lambda self, t: (
+            setattr(self, 'correction_factor', t),
+            setattr(self.button_correction_factor, 'text', f"✍️ Correction Factor: {t:.2f}"),
+            self.update_power_labels()
+        )
+    )
+    def set_correction_factor(self): 
+        pass
+
+    def update_power_labels(self):
+        # Update the power labels based on the current correction factor
+        self.true_power = self.read_power * self.correction_factor
+        self.read_power_label.text = f"🔎⚡️ Read Power: {self.read_power} uW"
+        self.true_power_label.text = f"👌⚡️ True Power: {self.true_power:.2f} uW"
+
+
+    @combo_popup(
+        title="Choose attenuation",
+        get_current=lambda self: f"{self.button_attenuation.text}",
+        hint="Attenuation factor (e.g. 4.0).",
+        validate=float,
+        choices=[(1, '1'), (2, '2'), (4, '4'), (10, '10')],
+        on_success=lambda self, val: (
+            print(f"Attenuation set to: {val}"),
+            setattr(self.button_attenuation, 'text', f"🔈 Attenuation: {val} %"),
+        )
+    )
+    def set_attenuation(self, *_):
+        pass
+
+    def set_max_power(self, *_):
+        # self.setup.set_max_power()
+        print("Setting max power...")
+    
+    def go_back(self, *_):
+        # Close the popup and return to the main screen
+        self.manager.current = 'main'
+        self.manager.remove_widget(self)
+        
 ### ========== App ==========
 
 class SabbathApp(App):

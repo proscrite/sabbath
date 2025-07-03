@@ -35,10 +35,12 @@ Logger.setLevel(logging.INFO)
 from functools import partial, wraps
 
 from microscope_control.saving import *
-from microscope_control.SetupSettings import write_settings
 from microscope_control.Constants import *
+from microscope_control.SetupSettings import write_settings
+from microscope_control.button_decorators import text_popup, choice_popup, combo_popup, PopupMixin
 from .main import Setup  # your actual Setup class
-from .autofocus_whitelight import autofocus_whitelight
+from microscope_control.PowerManagement_screen import PowerManagement
+from .autofocus_whitelight import AutofocusWhitelight
 from microscope_control.screen_roi_selection import ROI_selection_screen, draw_roi, get_cutoff
 
 # # 1) Create a shared context:
@@ -58,124 +60,6 @@ def _validate_nonempty_text(s):
     if not s:
         raise ValueError("Input cannot be empty")
     return s
-
-class PopupMixin:
-    def _show_input_popup(self, *, title, current_text, hint, validate, on_success, size_hint=(0.5, 0.5)):
-        layout = GridLayout(cols=1, padding=10, spacing=10)
-        layout.add_widget(Label(text=current_text, font_name ='EmojiFont', ))
-        ti = TextInput(hint_text=hint, font_name='EmojiFont', multiline=False)
-        btn = Button(text="Set")
-        popup = Popup(title=title, content=layout, size_hint=size_hint)
-
-        def _do_set(*_):
-            try:
-                val = validate(ti.text)
-                on_success(val)
-                popup.dismiss()
-            except Exception:
-                ti.text = "❌ invalid"
-
-        ti.bind(on_text_validate=_do_set)
-        btn.bind(on_press=_do_set)
-        layout.add_widget(ti)
-        layout.add_widget(btn)
-        popup.open()
-
-    def _show_choice_popup(self, *, title, current_text, choices, on_success, size_hint=(0.6, 0.9)):
-        layout = GridLayout(cols=2, spacing=10, padding=10)
-        layout.add_widget(Label(text=current_text, size_hint_y=None, height=40))
-        layout.add_widget(Widget(size_hint_y=None, height=0))
-
-        popup = Popup(title=title, content=layout, size_hint=(0.6, 0.85))
-
-        for label, val in choices:
-            btn = Button(text=label, size_hint_y=None, height=40)
-            btn.bind(on_press=lambda *_ ,v=val: (on_success(v), popup.dismiss()))
-            layout.add_widget(btn)
-
-        popup.open()
-
-    def _show_combo_popup(self, *, title, current_text, hint, validate, choices, on_success, size_hint=(0.8, 0.8)):
-        
-        scroll = ScrollView(size_hint=(1, 1))
-        popup = Popup(title=title, content=scroll, size_hint=size_hint)  
-        
-        grid = GridLayout(cols=2, spacing=5, size_hint_y=None)
-        grid.add_widget(Label(text=current_text, size_hint_y=None, height=40))
-        grid.add_widget(Widget(size_hint_y=None, height=40))     # empty space for layout balance
-        for label, val in choices:
-            btn = Button(text=val, size_hint_y=None, height=40)
-            btn.bind(on_press=lambda *_ ,v=val: (on_success(v), popup.dismiss()))
-            grid.add_widget(btn)
-
-        ti = TextInput(hint_text=hint, multiline=False, font_name = 'EmojiFont', size_hint_y=None, height=40)  
-        def _do_set(*_):
-            try:
-                v = validate(ti.text)
-                on_success(v)
-                popup.dismiss()
-            except ValueError as e:
-                print('Exception: ', e)
-                ti.text = "❌ invalid"
-        ti.bind(on_text_validate=_do_set)
-        grid.add_widget(ti)
-        scroll.add_widget(grid)
-        popup.open()
-
-### ========== Decorators ==========
-
-def text_popup(title, hint, get_current, validate, on_success):
-    def deco(fn):
-        @wraps(fn)
-        def wrapped(self, *args, **kwargs):
-            self._show_input_popup(
-                title=title,
-                current_text=get_current(self),
-                hint=hint,
-                validate=validate,
-                on_success=lambda v: on_success(self, v)
-            )
-        return wrapped
-    return deco
-
-def choice_popup(title, get_current, choices, on_success, flag_popup: str = None):
-    def deco(fn):
-        @wraps(fn)
-        def wrapped(self, *args, **kwargs):
-            if flag_popup and getattr(self, flag_popup, False):
-                return fn(self, *args, **kwargs)
-            def _on_choice(v):
-                on_success(self, v)
-                fn(self, v, *args, **kwargs)
-            self._show_choice_popup(
-                title=title,
-                current_text=get_current(self),
-                choices=choices,
-                on_success=_on_choice
-            )
-        return wrapped
-    return deco
-
-def combo_popup(title, get_current, hint, validate, choices, on_success, flag_popup: str = None):
-    def deco(fn):
-        @wraps(fn)
-        def wrapped(self, *args, **kwargs):
-            if flag_popup and getattr(self, flag_popup, False):
-                return fn(self, *args, **kwargs)
-            # else, show the combo popup
-            def _on_choice(v):
-                on_success(self, v)
-                fn(self, v, *args, **kwargs)
-            self._show_combo_popup(
-                title=title,
-                current_text=get_current(self),
-                hint=hint,
-                validate=validate,
-                choices=choices,
-                on_success=_on_choice
-            )
-        return wrapped
-    return deco
 
 ### ========== Screen ==========
 
@@ -239,7 +123,9 @@ class MainScreen(Screen, PopupMixin):
         self._add_button('Refresh Power reading 📟🔋', self.print_power_label)
         self._add_button('Manage Power 🎚️🔋', self.manage_power)
         self._add_button('Toggle Shutter 🎬', self.manage_toggle_shutter)
-        self._add_button('Settings ⚙️', self.show_settings_menu)
+        self._add_button('Acquisition Settings 🎥⚙️', self.manage_camera_settings)
+        self.button_layout.add_widget(Widget(size_hint_y=None, height=20))  # Spacer for layout balance
+        self._add_button('Setup Settings 🛠️🧩', self.show_settings_menu)
 
 
     def _add_label(self, text, font_size=18, x_proportion = 200):
@@ -385,7 +271,7 @@ class MainScreen(Screen, PopupMixin):
         if self.manager.has_screen('autofocus'):
             self.manager.remove_widget(self.manager.get_screen('autofocus'))
 
-        autofoc = autofocus_whitelight(name='autofocus', setup=self.setup)
+        autofoc = AutofocusWhitelight(name='autofocus', setup=self.setup)
         self.manager.add_widget(autofoc)
         self.manager.current = 'autofocus'
 
@@ -525,8 +411,20 @@ class MainScreen(Screen, PopupMixin):
         power = self.setup.get_power()
         self.label_power.text = f"P: {power * 1e6:.2f} uW"
         
-    def manage_power(self, *_):
-        pass
+    def manage_power(self):
+        if self.manager.has_screen('power_management'):
+            self.manager.remove_widget(self.manager.get_screen('power_management'))
+
+        power_manage = PowerManagement(name='power_management', setup=self.setup)
+        self.manager.add_widget(power_manage)
+        self.manager.current = 'power_management'
+    def manage_camera_settings(self):
+        if self.manager.has_screen('camera_settings'):
+            self.manager.remove_widget(self.manager.get_screen('camera_settings'))
+
+        cam_set = CameraSettingsScreen(name='camera_settings', setup=self.setup)
+        self.manager.add_widget(cam_set)
+        self.manager.current = 'camera_settings'
 
     def show_settings_menu(self, *_):
         settings_df = self.setup.settings
@@ -971,6 +869,83 @@ class TrajectoryScreen(Screen):
         
         self.save_img_btn.text = f"Images saved! Measurement nr: {self.measurement_nr} 💾📸✅️" 
         self.save_img_btn.disabled = True
+        
+### ========== Camera Settings Screen ==========
+
+class CameraSettingsScreen(Screen, PopupMixin):
+    def __init__(self, setup, **kwargs):
+        super().__init__(**kwargs)
+        self.setup = setup
+        root = BoxLayout(orientation='vertical')
+        root.add_widget(Widget(size_hint_y=1))      # Spacer to push content down
+
+        layout = GridLayout(cols=2, spacing=10, padding=10, size_hint_y=None)
+        layout.bind(minimum_height=layout.setter('height'))
+
+        current_exposure = 0.5
+        current_speed = 'fast'
+        current_binning = 1
+        current_image_size = 2048
+
+        self.button_speed = Button(text=f"Speed: {current_speed}", size_hint=(1, None), height=50)
+        self.button_speed.bind(on_press=self.set_readout_speed)
+        layout.add_widget(self.button_speed)
+
+        self.button_exposure = Button(text=f"Exposure: {current_exposure} s", size_hint=(1, None), height=50)
+        self.button_exposure.bind(on_press=self.manage_exposure)
+        layout.add_widget(self.button_exposure)
+
+        self.button_binning = Button(text=f"Binning: {current_binning}", size_hint=(1, None), height=50)
+        self.button_binning.bind(on_press=self.set_binning)
+        layout.add_widget(self.button_binning)
+    
+        self.button_image_size = Button(text=f"Image Size: {current_image_size}", size_hint=(1, None), height=50)
+        layout.add_widget(self.button_image_size)
+
+        layout.add_widget(Button(text = "Go Back", size_hint=(1, None), height=50,
+            on_release=self.go_back, font_name='EmojiFont'))
+
+        root.add_widget(layout)
+        root.add_widget(Widget(size_hint_y=1))      # Spacer to push content down
+        self.add_widget(root)
+
+    @text_popup(
+        title="Set Exposure",
+        hint="Seconds",
+        get_current=lambda self: f"Current Exposure: {self.setup.texp:.2f}s",
+        validate=float,
+        on_success=lambda self, t: (
+            self.setup.set_exposure(t),
+            setattr(self.label_exposure_status, 'text', f"Exposure: {t:.2f}s")
+        )
+    )
+    def manage_exposure(self): pass
+
+    @choice_popup(
+        title="Choose Speed",
+        get_current=lambda self: f"Current Speed: {self.button_speed.text}",
+        choices=[("Fast", "fast"), ("Slow", "slow")],
+        on_success=lambda self, v: setattr(self.button_speed, 'text', f"Speed: {v}"),
+        flag_popup='Readout Speed'
+    )
+    def set_readout_speed(self, val, *_):
+        self.setup.set_readout_speed(val)
+
+    @choice_popup(
+        title="Choose Binning",
+        get_current=lambda self: f"Current Binning: {self.button_binning.text}",
+        choices=[('1', 1), ('2', 2), ('4', 4)],
+        on_success=lambda self, v: ( setattr(self.button_binning, 'text', f"Binning: {v}"),
+                                    setattr(self.button_image_size, 'text', f"Image Size: {2048 // v}")),
+        flag_popup='Binning'
+    )
+    def set_binning(self, val, *_):
+        self.setup.set_binning(val)
+
+    def go_back(self, *_):
+        # Close the popup and return to the main screen
+        self.manager.current = 'main'
+        self.manager.remove_widget(self)
         
 
 ### ========== App ==========
