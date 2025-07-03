@@ -16,14 +16,17 @@ from kivy.uix.popup import Popup
 from kivy.clock import Clock
 
 
-class autofocus_whitelight(Screen):
+class AutofocusWhitelight(Screen):
     """Autofocus using white light illumination with coarse and fine passes."""
     def __init__(self, setup, **kwargs):
         super().__init__(**kwargs)
         self.setup = setup
         self.setup.cam.set_exposure(0.03)  # set exposure to 30ms for white light (high intensity source)
-        self.setup.close_shutter()
-        self.init_zpos = 17.0  # initial position for coarse autofocus
+        # self.setup.close_shutter()
+        self.setup.move_filter(1)  # ensure filter wheel is at position 1 (NA)
+        self.init_zpos = 19.5  # initial position for coarse autofocus
+        self.coarse_step = -0.1  # coarse step size in mm
+        self.fine_step = -0.05  # fine step size in mm
         self.abort = False
 
         # Build UI
@@ -52,7 +55,7 @@ class autofocus_whitelight(Screen):
         self.init_popup()
 
     def init_popup(self):
-        content = GridLayout(cols=2, rows=2)
+        content = GridLayout(cols=2, rows=3)
         content.add_widget(Label(text="Have you switched ON white light illumination?"))
         content.add_widget(Label())
         btn_yes = Button(text="Yes", size_hint_y=None, height=50)
@@ -85,7 +88,7 @@ class autofocus_whitelight(Screen):
         self.kurt_coarse = []
         # directly initiate fine pass around current motor position
         self.call_autofocus_pass(
-            nsteps=20, step=-0.01,
+            nsteps=20, step=self.fine_step,
             z_list_attr='zpos_fine',
             metric_list_attr='kurt_fine',
             ax=self.ax[1],
@@ -108,7 +111,7 @@ class autofocus_whitelight(Screen):
         self.setup.motor.move_to(self.init_zpos)  # move to the starting position
         self.setup.motor.wait_move()
         self.call_autofocus_pass(
-            nsteps=20, step=-0.1,
+            nsteps=20, step=self.coarse_step,
             z_list_attr='zpos_coarse',
             metric_list_attr='kurt_coarse',
             ax=self.ax[0],
@@ -129,7 +132,7 @@ class autofocus_whitelight(Screen):
             self.setup.motor.wait_move()
 
         self.call_autofocus_pass(
-            nsteps=20, step=-0.01,
+            nsteps=20, step=self.fine_step,
             z_list_attr='zpos_fine',
             metric_list_attr='kurt_fine',
             ax=self.ax[1],
@@ -145,7 +148,7 @@ class autofocus_whitelight(Screen):
         setattr(self, 'step', step)
 
         # move to start of pass for coarse only
-        if step == -0.1:
+        if step == self.coarse_step:
             self.setup.motor.move_to(self.init_zpos)
             self.setup.motor.wait_move()
 
